@@ -64,6 +64,16 @@ test('parseCliArgs rejects a missing URL', () => {
   assert.throws(() => parseCliArgs([]), (error) => error.code === 'bad-usage');
 });
 
+test('parseCliArgs parses --headless', () => {
+  const opts = parseCliArgs(['https://www.instagram.com/stories/example/123/', '--headless']);
+  assert.equal(opts.headless, true);
+});
+
+test('parseCliArgs defaults --headless to false', () => {
+  const opts = parseCliArgs(['https://www.instagram.com/stories/example/123/']);
+  assert.equal(opts.headless, false);
+});
+
 test('parseCliArgs rejects a non-numeric timeout', () => {
   assert.throws(
     () => parseCliArgs(['https://www.instagram.com/stories/example/123/', '--timeout', 'soon']),
