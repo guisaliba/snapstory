@@ -87,6 +87,7 @@ Options:
 | --- | --- |
 | `-o, --output <path>` | Output file path. Default: `<username>-<story-id>.mp4` |
 | `--profile <path>` | Browser profile directory. |
+| `--headless` | Run without a visible browser. Requires an authenticated profile. |
 | `--keep-temp` | Keep the reconstructed video and audio files. |
 | `--headed` | Force a visible browser (already the default). |
 | `--timeout <seconds>` | Maximum time to wait for the Story to load and finish. |
@@ -131,6 +132,52 @@ On the first run:
 3. `snapstory` detects the new session and continues automatically.
 
 Later runs reuse the saved session.
+
+## Headless and remote hosts
+
+`--headless` runs without a visible window, which is useful on a remote host
+with no GUI. It requires an **existing authenticated profile**, because the
+first login needs a human and a visible browser.
+
+Seed the profile on a device with a GUI:
+
+```bash
+git clone <your-repo-url> snapstory
+cd snapstory
+npm install
+npx playwright install chromium
+
+# Log in once in headed mode. The session is saved when the run ends.
+./bin/snapstory 'https://www.instagram.com/stories/<user>/<id>/' --keep-temp
+```
+
+The profile is written to:
+
+```text
+${XDG_DATA_HOME:-$HOME/.local/share}/snapstory/profile
+```
+
+Copy it to the remote host over SSH:
+
+```bash
+tar -C "${XDG_DATA_HOME:-$HOME/.local/share}/snapstory" -czf snapstory-profile.tgz profile
+scp snapstory-profile.tgz user@remote:/tmp/
+
+ssh user@remote 'mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/snapstory" \
+  && tar -C "${XDG_DATA_HOME:-$HOME/.local/share}/snapstory" -xzf /tmp/snapstory-profile.tgz \
+  && rm -f /tmp/snapstory-profile.tgz'
+```
+
+Then run headless on the remote host:
+
+```bash
+snapstory '<story-url>' --headless --debug
+```
+
+Headless mode uses Playwright's new headless mode, which is a full Chrome build.
+Instagram is more likely to serve its normal player to it than to the older
+headless shell. Reliability is still not guaranteed, so use `--debug` and check
+the capture diagnostics.
 
 ## Security
 
