@@ -166,6 +166,32 @@ async function findStoryGate(page) {
 }
 
 /**
+ * Last-resort fallback: find the deepest visible element whose own text is
+ * exactly "View story" and click it in the page. This covers prompts rendered
+ * as a bare `div` without an ARIA role.
+ */
+async function clickGateByText(page) {
+  return page
+    .evaluate(() => {
+      const pattern = /^\s*view\s+story\s*$/i;
+      const nodes = Array.from(
+        document.querySelectorAll('button, [role="button"], a, div, span'),
+      );
+      for (let index = nodes.length - 1; index >= 0; index -= 1) {
+        const element = nodes[index];
+        const text = (element.innerText || element.textContent || '').trim();
+        if (!pattern.test(text)) continue;
+        const rect = element.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) continue;
+        element.click();
+        return true;
+      }
+      return false;
+    })
+    .catch(() => false);
+}
+
+/**
  * Prepare the Story for capture:
  *   1. Click the confirmation interstitial if Instagram shows one.
  *   2. Wait until a `<video>` element exists.
@@ -191,6 +217,11 @@ export async function prepareStory(page, { timeoutMs, log = () => {}, debug = fa
       } catch (error) {
         if (debug) log(`[ui] Could not click the Story confirmation prompt: ${error.message}`);
       }
+    } else if (await clickGateByText(page)) {
+      gateClicks += 1;
+      if (debug) log(`[ui] Clicked the Story confirmation prompt by exact text (click ${gateClicks}).`);
+      await page.waitForTimeout(1000);
+      continue;
     }
 
     const state = await page
