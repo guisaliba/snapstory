@@ -29,15 +29,24 @@ export function defaultProfileDir() {
  * Launch a persistent Chromium context.
  *
  * `headless` defaults to false. Instagram behaves differently under headless
- * Chromium, and reliability outranks hiding the window. The autoplay flag is
- * required so `video.play()` works without a user gesture in headed mode.
+ * Chromium, and reliability outranks hiding the window.
+ *
+ * When `headless` is true the caller passes `channel: 'chromium'`, which
+ * selects Playwright's "new" headless mode (a full Chrome build) instead of
+ * the older headless shell. Instagram is more likely to serve its normal
+ * player to the new headless mode.
+ *
+ * The autoplay flag is required so `video.play()` works without a user
+ * gesture.
  */
-export async function launchBrowser({ profileDir, headless = false, debug = false } = {}) {
-  return chromium.launchPersistentContext(profileDir, {
+export async function launchBrowser({ profileDir, headless = false, channel, debug = false } = {}) {
+  const options = {
     headless,
     viewport: { width: 1280, height: 800 },
     args: ['--autoplay-policy=no-user-gesture-required', '--disable-blink-features=AutomationControlled'],
-  });
+  };
+  if (channel) options.channel = channel;
+  return chromium.launchPersistentContext(profileDir, options);
 }
 
 /** True when a `sessionid` cookie for instagram.com exists. */
@@ -51,7 +60,7 @@ export async function isAuthenticated(context) {
  * Instagram, tells the user to log in, and polls until the session cookie
  * appears, so the same run continues automatically.
  */
-export async function ensureAuthenticated(context, page, { timeoutMs, log, debug }) {
+export async function ensureAuthenticated(context, page, { timeoutMs, log, debug, headless = false }) {
   await page
     .goto(INSTAGRAM_ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 })
     .catch(() => {});
@@ -62,6 +71,19 @@ export async function ensureAuthenticated(context, page, { timeoutMs, log, debug
   }
 
   log('No authenticated Instagram session was found.');
+
+  // A first login needs a human and a visible window. In headless mode there
+  // is no window, so fail fast instead of waiting for a login that cannot
+  // happen.
+  if (headless) {
+    throw new AppError(
+      'auth-required',
+      'No authenticated Instagram session was found.\n' +
+        'Log in once in headed mode on a machine with a GUI, then copy the\n' +
+        'browser profile to this host, or run without --headless.',
+    );
+  }
+
   log('A browser window was opened.');
   log('Log in to Instagram to continue.');
 

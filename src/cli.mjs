@@ -92,6 +92,7 @@ export function parseCliArgs(argv) {
         output: { type: 'string', short: 'o' },
         profile: { type: 'string' },
         'keep-temp': { type: 'boolean' },
+        headless: { type: 'boolean' },
         headed: { type: 'boolean' },
         timeout: { type: 'string' },
         debug: { type: 'boolean' },
@@ -113,6 +114,7 @@ export function parseCliArgs(argv) {
       profile: null,
       keepTemp: false,
       headed: false,
+      headless: false,
       timeoutMs: 120000,
       debug: false,
       force: false,
@@ -138,6 +140,7 @@ export function parseCliArgs(argv) {
     profile: values.profile ?? null,
     keepTemp: !!values['keep-temp'],
     headed: !!values.headed,
+    headless: !!values.headless,
     timeoutMs,
     debug: !!values.debug,
     force: !!values.force,
@@ -153,6 +156,8 @@ Usage:
 Options:
   -o, --output <path>   Output file path. Default: <username>-<story-id>.mp4
       --profile <path>  Browser profile directory.
+      --headless        Run without a visible browser. Requires an existing
+                        authenticated profile.
       --keep-temp       Keep reconstructed video and audio files.
       --headed          Force a visible browser (already the default).
       --timeout <sec>   Maximum time to wait for the Story to load and finish.
@@ -284,7 +289,12 @@ export async function main(argv, io = {}) {
   try {
     log('Opening Story...');
 
-    context = await launchBrowser({ profileDir, headless: false, debug });
+    context = await launchBrowser({
+      profileDir,
+      headless: opts.headless,
+      channel: opts.headless ? 'chromium' : undefined,
+      debug,
+    });
     await receiver.attach(context);
     await context.addInitScript({ content: INIT_SCRIPT });
 
@@ -295,6 +305,7 @@ export async function main(argv, io = {}) {
       timeoutMs: opts.timeoutMs,
       log,
       debug,
+      headless: opts.headless,
     });
 
     await openStory(page, story.url, { timeoutMs: opts.timeoutMs });
