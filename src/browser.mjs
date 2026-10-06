@@ -139,6 +139,101 @@ export async function detectStoryState(page) {
 }
 
 /**
+ * Find the Story confirmation interstitial, if present.
+ *
+ * Instagram can show a dialog such as "View story as <username>?" with a
+ * "View story" button. The media does not load until that button is clicked.
+ * Matching is tolerant and case-insensitive; the label is logged in debug mode
+ * so an unknown wording can be reported and added.
+ */
+async function findStoryGate(page) {
+  const strategies = [
+    page.getByRole('button', { name: /view\s+story/i }),
+    page.getByRole('button', { name: /view\s+this\s+story/i }),
+    page.getByRole('link', { name: /view\s+story/i }),
+    page.locator('button, [role="button"], a').filter({ hasText: /view\s+story/i }),
+  ];
+  for (const locator of strategies) {
+    const count = await locator.count().catch(() => 0);
+    for (let index = 0; index < count; index += 1) {
+      const candidate = locator.nth(index);
+      if (await candidate.isVisible().catch(() => false)) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Prepare the Story for capture:
+ *   1. Click the confirmation interstitial if Instagram shows one.
+ *   2. Wait until a `<video>` element exists.
+ *
+ * Without step 1 the media is never requested, so capture would find nothing.
+ *
+ * @returns {Promise<{ ok: boolean, gateClicks: number, videoCount: number, imageCount: number, buttonTexts: string[] }>}
+ */
+export async function prepareStory(page, { timeoutMs, log = () => {}, debug = false }) {
+  const deadline = Date.now() + timeoutMs;
+  let gateClicks = 0;
+  let buttonTexts = [];
+
+  while (Date.now() < deadline) {
+    const gate = await findStoryGate(page);
+    if (gate) {
+      try {
+        await gate.click({ timeout: 3000 });
+        gateClicks += 1;
+        if (debug) log(`[ui] Clicked the Story confirmation prompt (click ${gateClicks}).`);
+        await page.waitForTimeout(1000);
+        continue;
+      } catch (error) {
+        if (debug) log(`[ui] Could not click the Story confirmation prompt: ${error.message}`);
+      }
+    }
+
+    const state = await page
+      .evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"], a'))
+          .map((element) =>
+            (element.innerText || element.getAttribute('aria-label') || '').trim(),
+          )
+          .filter(Boolean)
+          .slice(0, 25);
+        return {
+          videos: document.querySelectorAll('video').length,
+          images: document.querySelectorAll('img').length,
+          buttons,
+        };
+      })
+      .catch(() => ({ videos: 0, images: 0, buttons: [] }));
+
+    buttonTexts = state.buttons;
+    if (state.videos > 0) {
+      return { ok: true, gateClicks, videoCount: state.videos, imageCount: state.images, buttonTexts };
+    }
+    await page.waitForTimeout(500);
+  }
+
+  const finalState = await page
+    .evaluate(() => ({
+      videos: document.querySelectorAll('video').length,
+      images: document.querySelectorAll('img').length,
+    }))
+    .catch(() => ({ videos: 0, images: 0 }));
+
+  if (debug) log(`[ui] Visible buttons at timeout: ${JSON.stringify(buttonTexts)}`);
+  return {
+    ok: false,
+    gateClicks,
+    videoCount: finalState.videos,
+    imageCount: finalState.images,
+    buttonTexts,
+  };
+}
+
+/**
  * Start playback of the most likely Story video and unmute it.
  *
  * Playback matters: Instagram fetches and appends media fragments while the

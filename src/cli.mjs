@@ -37,6 +37,7 @@ import {
   ensureAuthenticated,
   launchBrowser,
   openStory,
+  prepareStory,
   startPlayback,
   waitForActiveMediaSource,
   waitForCaptureComplete,
@@ -329,6 +330,22 @@ export async function main(argv, io = {}) {
     }
 
     log('Capturing media...');
+    const prepared = await prepareStory(page, { timeoutMs: opts.timeoutMs, log, debug });
+    if (!prepared.ok) {
+      if (prepared.imageCount > 0 && prepared.videoCount === 0) {
+        throw new AppError('no-video', 'The selected Story does not contain a video.');
+      }
+      throw new AppError(
+        'no-video',
+        'No Story video appeared. Instagram may show a confirmation prompt that was not recognized.\n' +
+          `Visible buttons: ${JSON.stringify(prepared.buttonTexts)}\n` +
+          'Run with --debug and report the button labels.',
+      );
+    }
+    if (debug) {
+      dlog(`[ui] Story prepared: gate clicks=${prepared.gateClicks}, videos=${prepared.videoCount}`);
+    }
+
     const play = await startPlayback(page);
     if (!play.ok && play.reason === 'no-video-element') {
       throw new AppError('no-video', 'The selected Story does not contain a video.');
