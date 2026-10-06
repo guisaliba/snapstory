@@ -1,0 +1,35 @@
+{
+  "name": "snapstory",
+  "version": "0.1.0",
+  "description": "Download Instagram Story videos, including audio, by capturing Media Source Extensions data in a real browser.",
+  "type": "module",
+  "bin": {
+    "snapstory": "./bin/snapstory"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/unit.test.mjs test/remux.test.mjs test/mse-fixture.test.mjs",
+    "test:unit": "node --test test/unit.test.mjs",
+    "test:mse": "node --test test/mse-fixture.test.mjs",
+    "test:instagram": "node test/instagram.integration.mjs"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "keywords": [
+    "instagram",
+    "story",
+    "mse",
+    "playwright",
+    "ffmpeg"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}

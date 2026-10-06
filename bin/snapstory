@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# Thin launcher for the snapstory CLI.
+# All application logic lives in src/cli.mjs. This wrapper only resolves the
+# real script directory (following symlinks created by `npm link`) and starts
+# Node.
+
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+exec node "$SCRIPT_DIR/../src/cli.mjs" "$@"
