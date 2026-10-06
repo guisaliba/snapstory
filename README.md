@@ -19,14 +19,16 @@ video and audio, and appends fragmented MP4 data to them.
 `snapstory`:
 
 1. Opens the Story in a real Chromium browser with your authenticated session.
-2. Installs an interceptor **before** Instagram creates its `MediaSource`
+2. Clicks the Instagram confirmation prompt that blocks Story media, when one
+   appears.
+3. Installs an interceptor **before** Instagram creates its `MediaSource`
    objects.
-3. Captures every `SourceBuffer.appendBuffer()` payload.
-4. Identifies the video and audio buffers by MIME type — never by buffer number.
-5. Keeps every chunk in its original append order.
-6. Reconstructs the fragmented MP4 video and audio streams.
-7. Remuxes them into one normal `.mp4` file with FFmpeg, using stream copy.
-8. Validates the result and cleans up temporary files.
+4. Captures every `SourceBuffer.appendBuffer()` payload.
+5. Identifies the video and audio buffers by MIME type — never by buffer number.
+6. Keeps every chunk in its original append order.
+7. Reconstructs the fragmented MP4 video and audio streams.
+8. Remuxes them into one normal `.mp4` file with FFmpeg, using stream copy.
+9. Validates the result and cleans up temporary files.
 
 The video and audio are **never re-encoded**. FFmpeg only changes the container.
 
@@ -71,6 +73,13 @@ After `npm link`, the `snapstory` command is available everywhere.
 
 ```bash
 snapstory '<story-url>'
+```
+
+Accepted Story URL forms:
+
+```text
+https://www.instagram.com/stories/<username>/<story-id>/
+https://www.instagram.com/stories/highlights/<highlight-id>/
 ```
 
 Example:
