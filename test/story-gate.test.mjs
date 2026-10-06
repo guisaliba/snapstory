@@ -41,6 +41,32 @@ test('prepareStory clicks the confirmation prompt and waits for the video', { ti
   }
 });
 
+test('prepareStory clicks a prompt rendered as a plain div without a role', { timeout: 60000 }, async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`
+      <html><body>
+        <div id="gate" style="width:120px;height:40px">View story</div>
+        <div id="stage"></div>
+        <script>
+          document.getElementById('gate').addEventListener('click', () => {
+            document.getElementById('gate').remove();
+            document.getElementById('stage').appendChild(document.createElement('video'));
+          });
+        </script>
+      </body></html>
+    `);
+
+    const result = await prepareStory(page, { timeoutMs: 10000 });
+    assert.equal(result.ok, true);
+    assert.equal(result.gateClicks, 1);
+    assert.equal(result.videoCount, 1);
+  } finally {
+    await browser.close();
+  }
+});
+
 test('prepareStory returns immediately when the video already exists', { timeout: 60000 }, async () => {
   const browser = await chromium.launch({ headless: true });
   try {
