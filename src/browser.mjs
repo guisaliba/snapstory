@@ -12,9 +12,17 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 
 import { AppError } from './errors.mjs';
+import { selectStoryImage } from './image.mjs';
 import { isVideoMp4 } from './media.mjs';
 
 const INSTAGRAM_ORIGIN = 'https://www.instagram.com/';
+
+/**
+ * How long to wait for a video element or MSE activity before classifying an
+ * item as an image. Without this grace period a poster image could
+ * misclassify a video Story.
+ */
+export const DEFAULT_VIDEO_GRACE_MS = 6000;
 
 /**
  * Default persistent profile directory.
@@ -194,16 +202,26 @@ async function clickGateByText(page) {
 /**
  * Prepare the Story for capture:
  *   1. Click the confirmation interstitial if Instagram shows one.
- *   2. Wait until a `<video>` element exists.
+ *   2. Decide whether the active item is a video or an image.
  *
- * Without step 1 the media is never requested, so capture would find nothing.
+ * The decision order prevents a poster image from misclassifying a video:
+ *   - A `<video>` element wins immediately.
+ *   - Any MediaSource activity keeps the video path alive while the element
+ *     mounts.
+ *   - An image is accepted only after `videoGraceMs` with no video element and
+ *     no MediaSource activity.
  *
- * @returns {Promise<{ ok: boolean, gateClicks: number, videoCount: number, imageCount: number, buttonTexts: string[] }>}
+ * @returns {Promise<{ ok: boolean, kind: 'video'|'image'|null, gateClicks: number, videoCount: number, imageCount: number, imageCandidates: number, buttonTexts: string[] }>}
  */
-export async function prepareStory(page, { timeoutMs, log = () => {}, debug = false }) {
-  const deadline = Date.now() + timeoutMs;
+export async function prepareStory(
+  page,
+  { timeoutMs, videoGraceMs = DEFAULT_VIDEO_GRACE_MS, log = () => {}, debug = false },
+) {
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
   let gateClicks = 0;
   let buttonTexts = [];
+  let imageCandidates = 0;
 
   while (Date.now() < deadline) {
     const gate = await findStoryGate(page);
@@ -232,18 +250,61 @@ export async function prepareStory(page, { timeoutMs, log = () => {}, debug = fa
           )
           .filter(Boolean)
           .slice(0, 25);
+        const mediaSources =
+          typeof window.__mseSnapshot === 'function'
+            ? window.__mseSnapshot().mediaSources.length
+            : 0;
         return {
           videos: document.querySelectorAll('video').length,
           images: document.querySelectorAll('img').length,
+          mediaSources,
           buttons,
         };
       })
-      .catch(() => ({ videos: 0, images: 0, buttons: [] }));
+      .catch(() => ({ videos: 0, images: 0, mediaSources: 0, buttons: [] }));
 
     buttonTexts = state.buttons;
+
     if (state.videos > 0) {
-      return { ok: true, gateClicks, videoCount: state.videos, imageCount: state.images, buttonTexts };
+      return {
+        ok: true,
+        kind: 'video',
+        gateClicks,
+        videoCount: state.videos,
+        imageCount: state.images,
+        imageCandidates,
+        buttonTexts,
+      };
     }
+
+    if (state.mediaSources === 0 && state.images > 0) {
+      const candidates = await page
+        .evaluate(() =>
+          typeof window.__snapstorySnapshotImages === 'function'
+            ? window.__snapstorySnapshotImages()
+            : [],
+        )
+        .catch(() => []);
+      imageCandidates = candidates.length;
+      const selection = selectStoryImage(candidates);
+      if (selection.chosen && Date.now() - startedAt >= videoGraceMs) {
+        if (debug) {
+          log(
+            `[ui] Classified Story as image after ${Date.now() - startedAt}ms (tier ${selection.tier}).`,
+          );
+        }
+        return {
+          ok: true,
+          kind: 'image',
+          gateClicks,
+          videoCount: 0,
+          imageCount: state.images,
+          imageCandidates,
+          buttonTexts,
+        };
+      }
+    }
+
     await page.waitForTimeout(500);
   }
 
@@ -257,9 +318,11 @@ export async function prepareStory(page, { timeoutMs, log = () => {}, debug = fa
   if (debug) log(`[ui] Visible buttons at timeout: ${JSON.stringify(buttonTexts)}`);
   return {
     ok: false,
+    kind: null,
     gateClicks,
     videoCount: finalState.videos,
     imageCount: finalState.images,
+    imageCandidates,
     buttonTexts,
   };
 }
