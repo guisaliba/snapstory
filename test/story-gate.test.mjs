@@ -104,17 +104,38 @@ test('prepareStory classifies an image Story after the video grace period', { ti
   );
 });
 
-test('prepareStory keeps the video path alive while MSE activity exists', { timeout: 60000 }, async () => {
+test('prepareStory keeps the video path alive while video buffers are active', { timeout: 60000 }, async () => {
+  const html = `<html><body><img src="${svgDataUrl(800, 1000)}" style="width:400px;height:500px"></body></html>`;
   await withPage(
     async (page) => {
-      await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent('<html><body></body></html>')}`);
+      await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
       await page.evaluate(() => {
-        window.__mseSnapshot = () => ({ mediaSources: [{ id: 0 }] });
+        window.__mseSnapshot = () => ({
+          mediaSources: [{ id: 0, buffers: [{ mime: 'video/mp4', chunkCount: 5 }] }],
+        });
       });
       const result = await prepareStory(page, { timeoutMs: 1500, videoGraceMs: 200 });
       assert.equal(result.ok, false);
       assert.equal(result.kind, null);
       assert.equal(result.videoCount, 0);
+    },
+    { init: true },
+  );
+});
+
+test('prepareStory ignores a preloaded MediaSource with no buffered data', { timeout: 60000 }, async () => {
+  const html = `<html><body><img src="${svgDataUrl(800, 1000)}" style="width:400px;height:500px"></body></html>`;
+  await withPage(
+    async (page) => {
+      await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      await page.evaluate(() => {
+        window.__mseSnapshot = () => ({
+          mediaSources: [{ id: 0, buffers: [{ mime: 'video/mp4', chunkCount: 0 }] }],
+        });
+      });
+      const result = await prepareStory(page, { timeoutMs: 10000, videoGraceMs: 200 });
+      assert.equal(result.ok, true);
+      assert.equal(result.kind, 'image');
     },
     { init: true },
   );

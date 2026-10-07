@@ -250,18 +250,29 @@ export async function prepareStory(
           )
           .filter(Boolean)
           .slice(0, 25);
-        const mediaSources =
-          typeof window.__mseSnapshot === 'function'
-            ? window.__mseSnapshot().mediaSources.length
-            : 0;
+        const snapshot =
+          typeof window.__mseSnapshot === 'function' ? window.__mseSnapshot() : null;
+        const mediaSources = snapshot ? snapshot.mediaSources.length : 0;
+        // Preloaded neighbors can create a MediaSource without buffering any
+        // video. Only buffered video proves that a video Story is active;
+        // otherwise a preloaded neighbor would block image classification.
+        const videoBuffering = snapshot
+          ? snapshot.mediaSources.some((mediaSource) =>
+              (mediaSource.buffers ?? []).some(
+                (buffer) =>
+                  (buffer.mime || '').startsWith('video/mp4') && (buffer.chunkCount ?? 0) > 0,
+              ),
+            )
+          : false;
         return {
           videos: document.querySelectorAll('video').length,
           images: document.querySelectorAll('img').length,
           mediaSources,
+          videoBuffering,
           buttons,
         };
       })
-      .catch(() => ({ videos: 0, images: 0, mediaSources: 0, buttons: [] }));
+      .catch(() => ({ videos: 0, images: 0, mediaSources: 0, videoBuffering: false, buttons: [] }));
 
     buttonTexts = state.buttons;
 
@@ -277,31 +288,33 @@ export async function prepareStory(
       };
     }
 
-    if (state.mediaSources === 0 && state.images > 0) {
-      const candidates = await page
-        .evaluate(() =>
-          typeof window.__snapstorySnapshotImages === 'function'
-            ? window.__snapstorySnapshotImages()
-            : [],
-        )
-        .catch(() => []);
-      imageCandidates = candidates.length;
-      const selection = selectStoryImage(candidates);
-      if (selection.chosen && Date.now() - startedAt >= videoGraceMs) {
-        if (debug) {
-          log(
-            `[ui] Classified Story as image after ${Date.now() - startedAt}ms (tier ${selection.tier}).`,
-          );
+    if (state.mediaSources === 0 || !state.videoBuffering) {
+      if (state.images > 0) {
+        const candidates = await page
+          .evaluate(() =>
+            typeof window.__snapstorySnapshotImages === 'function'
+              ? window.__snapstorySnapshotImages()
+              : [],
+          )
+          .catch(() => []);
+        imageCandidates = candidates.length;
+        const selection = selectStoryImage(candidates);
+        if (selection.chosen && Date.now() - startedAt >= videoGraceMs) {
+          if (debug) {
+            log(
+              `[ui] Classified Story as image after ${Date.now() - startedAt}ms (tier ${selection.tier}).`,
+            );
+          }
+          return {
+            ok: true,
+            kind: 'image',
+            gateClicks,
+            videoCount: 0,
+            imageCount: state.images,
+            imageCandidates,
+            buttonTexts,
+          };
         }
-        return {
-          ok: true,
-          kind: 'image',
-          gateClicks,
-          videoCount: 0,
-          imageCount: state.images,
-          imageCandidates,
-          buttonTexts,
-        };
       }
     }
 
