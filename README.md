@@ -1,7 +1,7 @@
 # snapstory
 
-Download an Instagram Story video, including its audio, by capturing the
-**Media Source Extensions** (MSE) data that Instagram sends to the browser.
+Download an Instagram Story video (including its audio) or a Story photo by
+capturing the media the browser receives.
 
 ## What it does
 
@@ -30,17 +30,23 @@ video and audio, and appends fragmented MP4 data to them.
 8. Remuxes them into one normal `.mp4` file with FFmpeg, using stream copy.
 9. Validates the result and cleans up temporary files.
 
+When the Story is a **photo**, no MediaSource exists. `snapstory` finds the
+active Story image in the page, rejects avatars and preloaded neighbors, waits
+for the image to settle, fetches the signed CDN URL through the same
+authenticated browser context, and saves the original bytes. Photos do not
+require FFmpeg.
+
 The video and audio are **never re-encoded**. FFmpeg only changes the container.
 
-This tool automates the MSE capture technique. It does not support every media
-format Instagram can serve; it relies on Instagram using MSE, which is the
-behavior currently observed for Story videos.
+This tool automates the observed Instagram media behavior: MSE for videos and
+signed CDN images for photos. It does not support every media format Instagram
+can serve; it relies on the behavior currently observed for Story items.
 
 ## Requirements
 
 - Node.js 20.11 or newer
 - npm
-- FFmpeg and FFprobe
+- FFmpeg and FFprobe (required for video Stories; not needed for photos)
 - Chromium, installed through Playwright
 - An Instagram account with access to the Story
 
@@ -141,6 +147,30 @@ On the first run:
 3. `snapstory` detects the new session and continues automatically.
 
 Later runs reuse the saved session.
+
+## Story images
+
+When the active Story item is a photo, `snapstory` saves it as an image file.
+
+```bash
+snapstory 'https://www.instagram.com/stories/highlights/<id>/'
+# Saved: /path/<username>-<story-id>.jpg
+```
+
+- Photos do not use MSE. The tool identifies the Story image in the page,
+  rejects the profile avatar and preloaded neighbors, waits for the image to
+  settle, then fetches the signed CDN URL through the authenticated context.
+- It saves the **original bytes**. JPEG, PNG, WebP, GIF, HEIC, and AVIF are
+  detected from magic bytes, not from the URL extension.
+- Without `--output`, the extension comes from the detected type. With
+  `--output`, the path is honored exactly, and a warning appears when its
+  extension disagrees with the detected type.
+- FFmpeg is not required for image Stories.
+- Resolution is limited to what Instagram serves to the page. The CDN URL is
+  signed; changing a size parameter is rejected with `403`.
+- Only the active item is saved. Carousels are not yet supported.
+- Signed URLs are treated as temporary secrets and are printed with the query
+  string removed.
 
 ## Headless and remote hosts
 
@@ -247,6 +277,9 @@ The suite runs without Instagram and without a browser login:
 - **MSE fixture test** — loads a local page in headless Chromium that uses
   `MediaSource` and `SourceBuffer`, then proves the interceptor captures video
   and audio bytes byte-for-byte.
+- **Image tests** — unit tests for type detection, selection, naming, and
+  `srcset` parsing; browser tests for the image observer, the settle wait
+  through a placeholder upgrade, and the authenticated fetch round-trip.
 
 ### Manual Instagram test
 
@@ -262,8 +295,10 @@ npm run test:instagram -- 'https://www.instagram.com/stories/<user>/<id>/'
 - Expired Stories cannot be downloaded.
 - The logged-in account must have access to the Story.
 - Instagram can change its media implementation at any time, which can break
-  MSE capture.
-- Image Stories are not supported in this version.
+  MSE capture or image discovery.
+- Photo resolution is limited to the size Instagram serves to the page. The
+  signed CDN URL cannot be edited to request a larger size.
+- Carousels are not supported. Only the active Story item is saved.
 - The tool depends on the MSE behavior currently observed on Instagram.
 - A headed browser is used by default because headless Chromium is less
   reliable for Instagram playback and capture.
