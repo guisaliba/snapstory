@@ -13,6 +13,7 @@
 
 import path from 'node:path';
 
+import { AppError } from './errors.mjs';
 import { expandHome, sanitizeComponent } from './media.mjs';
 
 /** Rendered images smaller than this are treated as icons, not Story media. */
@@ -256,4 +257,175 @@ export function extensionConflicts(filePath, type) {
     return false;
   }
   return true;
+}
+
+function signatureOf(candidate) {
+  return `${candidate.url}|${candidate.naturalWidth}x${candidate.naturalHeight}|${
+    candidate.complete ? 1 : 0
+  }`;
+}
+
+function finalizeCandidate(candidate) {
+  return { ...candidate, bestUrl: resolveBestImageUrl(candidate) };
+}
+
+/**
+ * Lock the active Story image and wait until it settles.
+ *
+ * Locking by registry id is what prevents a switch to the next carousel item.
+ * Settling avoids saving a placeholder that Instagram upgrades in place.
+ *
+ * @param {import('playwright').Page} page
+ * @param {{ timeoutMs?: number, quietMs?: number, pollMs?: number, log?: Function, debug?: boolean }} [options]
+ */
+export async function lockAndSettleStoryImage(page, options = {}) {
+  const {
+    timeoutMs = 30000,
+    quietMs = 1000,
+    pollMs = 200,
+    log = () => {},
+    debug = false,
+  } = options;
+  const deadline = Date.now() + timeoutMs;
+  let locked = null;
+  let lastSignature = '';
+  let quietSince = 0;
+
+  while (Date.now() < deadline) {
+    const candidates = await page.evaluate(() =>
+      typeof window.__snapstorySnapshotImages === 'function'
+        ? window.__snapstorySnapshotImages()
+        : [],
+    );
+
+    if (!locked) {
+      const selection = selectStoryImage(candidates);
+      if (!selection.chosen) {
+        await page.waitForTimeout(pollMs);
+        continue;
+      }
+      locked = selection.chosen;
+      lastSignature = signatureOf(locked);
+      quietSince = Date.now();
+      if (debug) {
+        log(
+          `[image] locked candidate id=${locked.id} tier=${selection.tier} ${sanitizeImageUrl(
+            locked.url,
+          )}`,
+        );
+      }
+    }
+
+    const current = candidates.find((candidate) => candidate.id === locked.id);
+    if (current) {
+      const signature = signatureOf(current);
+      if (signature !== lastSignature) {
+        lastSignature = signature;
+        quietSince = Date.now();
+        locked = current;
+      } else if (current.complete && Date.now() - quietSince >= quietMs) {
+        return finalizeCandidate(current);
+      }
+    } else {
+      // The Story advanced. Return the last good candidate, never the next item.
+      return finalizeCandidate(locked);
+    }
+
+    await page.waitForTimeout(pollMs);
+  }
+
+  if (locked) return finalizeCandidate(locked);
+  throw new AppError('no-media', 'No Story image was found.');
+}
+
+/**
+ * Fetch the image bytes through the authenticated browser context. Reusing the
+ * context is what carries cookies and TLS; no authentication is re-implemented.
+ *
+ * @param {import('playwright').BrowserContext} context
+ * @param {string} url
+ * @param {{ timeoutMs?: number, maxBytes?: number }} [options]
+ */
+export async function fetchImage(context, url, options = {}) {
+  const { timeoutMs = 30000, maxBytes = 32 * 1024 * 1024 } = options;
+
+  if (typeof url !== 'string' || url === '') {
+    throw new AppError('invalid-image', 'The Story image URL is empty.');
+  }
+  if (url.startsWith('blob:')) {
+    throw new AppError(
+      'invalid-image',
+      'The Story image is exposed as a blob URL. This variant is not supported.',
+      { url: sanitizeImageUrl(url) },
+    );
+  }
+
+  let response;
+  try {
+    response = await context.request.get(url, {
+      timeout: timeoutMs,
+      failOnStatusCode: false,
+      headers: {
+        referer: 'https://www.instagram.com/',
+        accept: 'image/*,*/*;q=0.8',
+      },
+    });
+  } catch (error) {
+    throw new AppError('image-fetch-failed', `Could not download the Story image: ${error.message}`);
+  }
+
+  if (!response.ok()) {
+    throw new AppError(
+      'image-fetch-failed',
+      `Could not download the Story image (HTTP ${response.status()}). The signed URL may have expired; retry.`,
+      { status: response.status() },
+    );
+  }
+
+  const bytes = Buffer.from(await response.body());
+  if (bytes.length === 0) {
+    throw new AppError('invalid-image', 'The downloaded Story image is empty.');
+  }
+  if (bytes.length > maxBytes) {
+    throw new AppError('invalid-image', `The downloaded Story image exceeds ${maxBytes} bytes.`, {
+      bytes: bytes.length,
+    });
+  }
+
+  return {
+    bytes,
+    contentType: response.headers()['content-type'] ?? null,
+    status: response.status(),
+  };
+}
+
+/**
+ * Full image acquisition: lock, settle, fetch, and detect the type.
+ *
+ * @returns {Promise<{ bytes: Buffer, type: string, extension: string, url: string, status: number, contentType: string|null, naturalWidth: number, naturalHeight: number }>}
+ */
+export async function downloadStoryImage(context, page, options = {}) {
+  const candidate = await lockAndSettleStoryImage(page, options);
+  const url = candidate.bestUrl || candidate.url;
+  const { bytes, contentType, status } = await fetchImage(context, url, options);
+  const type = detectImageType(bytes);
+
+  if (!type) {
+    throw new AppError(
+      'invalid-image',
+      'The downloaded Story image is empty or has an unknown format.',
+      { status, contentType, bytes: bytes.length },
+    );
+  }
+
+  return {
+    bytes,
+    type,
+    extension: extensionForType(type),
+    url,
+    status,
+    contentType,
+    naturalWidth: candidate.naturalWidth,
+    naturalHeight: candidate.naturalHeight,
+  };
 }

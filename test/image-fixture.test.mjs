@@ -10,6 +10,12 @@ import test from 'node:test';
 import { chromium } from 'playwright';
 
 import { INIT_SCRIPT } from '../src/capture.mjs';
+import { fetchImage, lockAndSettleStoryImage } from '../src/image.mjs';
+
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 function svgDataUrl(width, height) {
   return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${width}' height='${height}'%3E%3C/svg%3E`;
@@ -35,7 +41,7 @@ async function withBrowser(run) {
     const context = await browser.newContext();
     await context.addInitScript({ content: INIT_SCRIPT });
     const page = await context.newPage();
-    return await run(page);
+    return await run({ context, page });
   } finally {
     await browser.close();
   }
@@ -49,7 +55,7 @@ test('image observer registers images with natural size and visibility', { timeo
   </body></html>`;
 
   await withServer(html, async (url) => {
-    await withBrowser(async (page) => {
+    await withBrowser(async ({ page }) => {
       await page.goto(url);
       await page.waitForFunction(() => {
         const images = Array.from(document.querySelectorAll('img'));
@@ -84,7 +90,7 @@ test('image observer updates recency when the source changes', { timeout: 60000 
   </body></html>`;
 
   await withServer(html, async (url) => {
-    await withBrowser(async (page) => {
+    await withBrowser(async ({ page }) => {
       await page.goto(url);
       await page.waitForFunction(() => {
         const image = document.querySelector('img');
@@ -109,4 +115,78 @@ test('image observer updates recency when the source changes', { timeout: 60000 
       assert.ok(after.lastSrcChangeAt >= before.lastSrcChangeAt);
     });
   });
+});
+
+test('lockAndSettleStoryImage waits through a placeholder upgrade', { timeout: 60000 }, async () => {
+  const html = `<!doctype html><html><body>
+    <img id="photo" src="${svgDataUrl(320, 320)}" style="width:300px;height:300px">
+    <script>
+      setTimeout(() => {
+        document.getElementById('photo').src = ${JSON.stringify(svgDataUrl(1600, 2000))};
+      }, 200);
+    </script>
+  </body></html>`;
+
+  await withServer(html, async (url) => {
+    await withBrowser(async ({ page }) => {
+      await page.goto(url);
+      const settled = await lockAndSettleStoryImage(page, {
+        timeoutMs: 15000,
+        quietMs: 600,
+        pollMs: 100,
+      });
+      assert.equal(settled.naturalWidth, 1600);
+      assert.equal(settled.naturalHeight, 2000);
+      assert.match(settled.bestUrl, /1600/);
+    });
+  });
+});
+
+test('fetchImage returns the exact bytes through the browser context', { timeout: 60000 }, async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'image/png' });
+    res.end(ONE_PIXEL_PNG);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+
+  try {
+    await withBrowser(async ({ context }) => {
+      const result = await fetchImage(context, `http://127.0.0.1:${port}/photo.png`);
+      assert.equal(result.status, 200);
+      assert.ok(result.bytes.equals(ONE_PIXEL_PNG), 'fetched bytes must equal the served bytes');
+      assert.equal(result.contentType, 'image/png');
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test('fetchImage rejects a blob URL with a clear error', { timeout: 60000 }, async () => {
+  await withBrowser(async ({ context }) => {
+    await assert.rejects(
+      () => fetchImage(context, 'blob:https://www.instagram.com/abc'),
+      (error) => error.code === 'invalid-image' && /blob URL/.test(error.message),
+    );
+  });
+});
+
+test('fetchImage reports a non-OK response', { timeout: 60000 }, async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(403, { 'content-type': 'text/plain' });
+    res.end('URL signature mismatch');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+
+  try {
+    await withBrowser(async ({ context }) => {
+      await assert.rejects(
+        () => fetchImage(context, `http://127.0.0.1:${port}/expired.jpg`),
+        (error) => error.code === 'image-fetch-failed' && /403/.test(error.message),
+      );
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
