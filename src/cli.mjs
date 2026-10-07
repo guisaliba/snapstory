@@ -24,6 +24,12 @@ import {
   selectBuffers,
 } from './media.mjs';
 import {
+  deriveImageOutputPath,
+  downloadStoryImage,
+  extensionConflicts,
+  sanitizeImageUrl,
+} from './image.mjs';
+import {
   assertFfmpeg,
   buildRemuxArgs,
   hasFfprobe,
@@ -32,6 +38,7 @@ import {
   validateProbe,
 } from './ffmpeg.mjs';
 import {
+  DEFAULT_VIDEO_GRACE_MS,
   defaultProfileDir,
   detectStoryState,
   ensureAuthenticated,
@@ -239,23 +246,6 @@ export async function main(argv, io = {}) {
     return exitCodeFor(error);
   }
 
-  try {
-    dlog(`FFmpeg: ${assertFfmpeg()}`);
-  } catch (error) {
-    err.write(`${error.message}\n`);
-    return exitCodeFor(error);
-  }
-
-  const requestedOutput = deriveOutputPath({
-    output: opts.output,
-    username: story.username,
-    storyId: story.storyId,
-  });
-  const outputPath = opts.force ? requestedOutput : nextAvailablePath(requestedOutput);
-  if (outputPath !== requestedOutput) {
-    log(`Output exists; writing to ${outputPath}`);
-  }
-
   const workDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'snapstory-'));
   dlog(`Working directory: ${workDir}`);
 
@@ -330,20 +320,81 @@ export async function main(argv, io = {}) {
     }
 
     log('Capturing media...');
-    const prepared = await prepareStory(page, { timeoutMs: opts.timeoutMs, log, debug });
+    const prepared = await prepareStory(page, {
+      timeoutMs: opts.timeoutMs,
+      videoGraceMs: Math.min(
+        DEFAULT_VIDEO_GRACE_MS,
+        Math.max(1000, Math.floor(opts.timeoutMs / 2)),
+      ),
+      log,
+      debug,
+    });
     if (!prepared.ok) {
-      if (prepared.imageCount > 0 && prepared.videoCount === 0) {
-        throw new AppError('no-video', 'The selected Story does not contain a video.');
-      }
       throw new AppError(
-        'no-video',
-        'No Story video appeared. Instagram may show a confirmation prompt that was not recognized.\n' +
+        'no-media',
+        'The selected Story does not contain a video or an image.\n' +
           `Visible buttons: ${JSON.stringify(prepared.buttonTexts)}\n` +
           'Run with --debug and report the button labels.',
       );
     }
     if (debug) {
-      dlog(`[ui] Story prepared: gate clicks=${prepared.gateClicks}, videos=${prepared.videoCount}`);
+      dlog(
+        `[ui] Story prepared: kind=${prepared.kind}, gate clicks=${prepared.gateClicks}, videos=${prepared.videoCount}, image candidates=${prepared.imageCandidates}`,
+      );
+    }
+
+    if (prepared.kind === 'image') {
+      log('Capturing image...');
+      const image = await downloadStoryImage(context, page, {
+        timeoutMs: opts.timeoutMs,
+        quietMs: 1000,
+        pollMs: 200,
+        log,
+        debug,
+      });
+      const requested = deriveImageOutputPath({
+        output: opts.output,
+        username: story.username,
+        storyId: story.storyId,
+        extension: image.extension,
+      });
+      const imagePath = opts.force ? requested : nextAvailablePath(requested);
+      if (imagePath !== requested) {
+        log(`Output exists; writing to ${imagePath}`);
+      }
+      if (opts.output && extensionConflicts(requested, image.type)) {
+        log(`Warning: output extension does not match the detected ${image.type} image.`);
+      }
+      await fs.promises.mkdir(path.dirname(imagePath), { recursive: true });
+      await fs.promises.writeFile(imagePath, image.bytes);
+      if (debug) {
+        dlog(
+          `[image] fetch status=${image.status} content-type=${image.contentType} type=${image.type} bytes=${image.bytes.length} natural=${image.naturalWidth}x${image.naturalHeight}`,
+        );
+      }
+      log(
+        `Photo: ${image.type} ${formatBytes(image.bytes.length)} (${sanitizeImageUrl(image.url)})`,
+      );
+      log(`Saved: ${imagePath}`);
+      return EXIT_CODES.ok;
+    }
+
+    // FFmpeg is required only for the video path.
+    try {
+      dlog(`FFmpeg: ${assertFfmpeg()}`);
+    } catch (error) {
+      err.write(`${error.message}\n`);
+      return exitCodeFor(error);
+    }
+
+    const requestedOutput = deriveOutputPath({
+      output: opts.output,
+      username: story.username,
+      storyId: story.storyId,
+    });
+    const outputPath = opts.force ? requestedOutput : nextAvailablePath(requestedOutput);
+    if (outputPath !== requestedOutput) {
+      log(`Output exists; writing to ${outputPath}`);
     }
 
     const play = await startPlayback(page);
