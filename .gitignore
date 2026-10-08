@@ -9,6 +9,13 @@ snapstory/profile/
 *.mp4
 *.m4a
 *.m4v
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+*.heic
+*.avif
 
 # Temporary files
 tmp/
