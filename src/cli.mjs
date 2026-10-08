@@ -103,6 +103,7 @@ export function parseCliArgs(argv) {
         headless: { type: 'boolean' },
         headed: { type: 'boolean' },
         timeout: { type: 'string' },
+        'device-scale-factor': { type: 'string' },
         debug: { type: 'boolean' },
         force: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
@@ -123,6 +124,7 @@ export function parseCliArgs(argv) {
       keepTemp: false,
       headed: false,
       headless: false,
+      deviceScaleFactor: 1,
       timeoutMs: 120000,
       debug: false,
       force: false,
@@ -141,6 +143,18 @@ export function parseCliArgs(argv) {
     timeoutMs = Math.round(seconds * 1000);
   }
 
+  let deviceScaleFactor = 1;
+  if (values['device-scale-factor'] !== undefined) {
+    const scale = Number(values['device-scale-factor']);
+    if (!Number.isFinite(scale) || scale <= 0 || scale > 5) {
+      throw new AppError(
+        'bad-usage',
+        '--device-scale-factor must be a number greater than 0 and at most 5.',
+      );
+    }
+    deviceScaleFactor = scale;
+  }
+
   return {
     help: false,
     url: positionals[0],
@@ -149,6 +163,7 @@ export function parseCliArgs(argv) {
     keepTemp: !!values['keep-temp'],
     headed: !!values.headed,
     headless: !!values.headless,
+    deviceScaleFactor,
     timeoutMs,
     debug: !!values.debug,
     force: !!values.force,
@@ -169,6 +184,9 @@ Options:
       --keep-temp       Keep reconstructed video and audio files.
       --headed          Force a visible browser (already the default).
       --timeout <sec>   Maximum time to wait for the Story to load and finish.
+      --device-scale-factor <n>
+                        Browser device pixel ratio (default 1). Higher values
+                        can make Instagram request larger image variants.
       --force           Overwrite the output file if it exists.
       --debug           Print detailed capture information.
   -h, --help            Show this help.
@@ -284,6 +302,7 @@ export async function main(argv, io = {}) {
       profileDir,
       headless: opts.headless,
       channel: opts.headless ? 'chromium' : undefined,
+      deviceScaleFactor: opts.deviceScaleFactor,
       debug,
     });
     await receiver.attach(context);

@@ -47,13 +47,20 @@ export function defaultProfileDir() {
  * The autoplay flag is required so `video.play()` works without a user
  * gesture.
  */
-export async function launchBrowser({ profileDir, headless = false, channel, debug = false } = {}) {
+export async function launchBrowser({
+  profileDir,
+  headless = false,
+  channel,
+  deviceScaleFactor,
+  debug = false,
+} = {}) {
   const options = {
     headless,
     viewport: { width: 1280, height: 800 },
     args: ['--autoplay-policy=no-user-gesture-required', '--disable-blink-features=AutomationControlled'],
   };
   if (channel) options.channel = channel;
+  if (deviceScaleFactor) options.deviceScaleFactor = deviceScaleFactor;
   return chromium.launchPersistentContext(profileDir, options);
 }
 

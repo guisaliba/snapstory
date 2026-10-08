@@ -81,6 +81,31 @@ test('parseCliArgs rejects a non-numeric timeout', () => {
   );
 });
 
+test('parseCliArgs parses --device-scale-factor', () => {
+  const opts = parseCliArgs([
+    'https://www.instagram.com/stories/example/123/',
+    '--device-scale-factor',
+    '3',
+  ]);
+  assert.equal(opts.deviceScaleFactor, 3);
+});
+
+test('parseCliArgs defaults deviceScaleFactor to 1', () => {
+  const opts = parseCliArgs(['https://www.instagram.com/stories/example/123/']);
+  assert.equal(opts.deviceScaleFactor, 1);
+});
+
+test('parseCliArgs rejects an invalid device scale factor', () => {
+  assert.throws(
+    () => parseCliArgs(['https://www.instagram.com/stories/example/123/', '--device-scale-factor', '0']),
+    (error) => error.code === 'bad-usage',
+  );
+  assert.throws(
+    () => parseCliArgs(['https://www.instagram.com/stories/example/123/', '--device-scale-factor', 'x']),
+    (error) => error.code === 'bad-usage',
+  );
+});
+
 test('parseCliArgs rejects an unknown option', () => {
   assert.throws(
     () => parseCliArgs(['https://www.instagram.com/stories/example/123/', '--nope']),

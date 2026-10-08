@@ -106,6 +106,7 @@ Options:
 | `--keep-temp` | Keep the reconstructed video and audio files. |
 | `--headed` | Force a visible browser (already the default). |
 | `--timeout <seconds>` | Maximum time to wait for the Story to load and finish. |
+| `--device-scale-factor <n>` | Browser device pixel ratio (default 1). Higher values can make Instagram request larger image variants. |
 | `--force` | Overwrite the output file if it exists. |
 | `--debug` | Print detailed capture information. |
 | `-h, --help` | Show usage. |
@@ -167,7 +168,10 @@ snapstory 'https://www.instagram.com/stories/highlights/<id>/'
   extension disagrees with the detected type.
 - FFmpeg is not required for image Stories.
 - Resolution is limited to what Instagram serves to the page. The CDN URL is
-  signed; changing a size parameter is rejected with `403`.
+  signed; changing a size parameter is rejected with `403`. If the served
+  variant looks small, try `--device-scale-factor 2` or `3` and compare the
+  `natural=` value in the `--debug` output. Instagram may size its variant from
+  the display size times the device pixel ratio.
 - Only the active item is saved. Carousels are not yet supported.
 - Signed URLs are treated as temporary secrets and are printed with the query
   string removed.
