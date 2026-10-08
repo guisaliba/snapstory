@@ -290,8 +290,8 @@ export function sanitizeComponent(value, fallback = 'story') {
  * Derive the output path.
  *
  * A user-supplied `--output` always wins. Otherwise the name is
- * `<username>-<story-id>.mp4` when both parts are known, and `story.mp4`
- * otherwise.
+ * `<username>-<story-id>.mp4` when both parts are known, `<username>.mp4` when
+ * only the username is known, and `story.mp4` otherwise.
  *
  * @param {{ output?: string|null, username?: string|null, storyId?: string|null, cwd?: string }} params
  */
@@ -305,6 +305,9 @@ export function deriveOutputPath(params = {}) {
       cwd,
       `${sanitizeComponent(params.username)}-${sanitizeComponent(params.storyId)}.mp4`,
     );
+  }
+  if (params.username) {
+    return path.resolve(cwd, `${sanitizeComponent(params.username)}.mp4`);
   }
   return path.resolve(cwd, 'story.mp4');
 }

@@ -12,9 +12,17 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 
 import { AppError } from './errors.mjs';
+import { selectStoryImage } from './image.mjs';
 import { isVideoMp4 } from './media.mjs';
 
 const INSTAGRAM_ORIGIN = 'https://www.instagram.com/';
+
+/**
+ * How long to wait for a video element or MSE activity before classifying an
+ * item as an image. Without this grace period a poster image could
+ * misclassify a video Story.
+ */
+export const DEFAULT_VIDEO_GRACE_MS = 6000;
 
 /**
  * Default persistent profile directory.
@@ -39,13 +47,20 @@ export function defaultProfileDir() {
  * The autoplay flag is required so `video.play()` works without a user
  * gesture.
  */
-export async function launchBrowser({ profileDir, headless = false, channel, debug = false } = {}) {
+export async function launchBrowser({
+  profileDir,
+  headless = false,
+  channel,
+  deviceScaleFactor,
+  debug = false,
+} = {}) {
   const options = {
     headless,
     viewport: { width: 1280, height: 800 },
     args: ['--autoplay-policy=no-user-gesture-required', '--disable-blink-features=AutomationControlled'],
   };
   if (channel) options.channel = channel;
+  if (deviceScaleFactor) options.deviceScaleFactor = deviceScaleFactor;
   return chromium.launchPersistentContext(profileDir, options);
 }
 
@@ -60,10 +75,24 @@ export async function isAuthenticated(context) {
  * Instagram, tells the user to log in, and polls until the session cookie
  * appears, so the same run continues automatically.
  */
-export async function ensureAuthenticated(context, page, { timeoutMs, log, debug, headless = false }) {
+export async function ensureAuthenticated(
+  context,
+  page,
+  { timeoutMs, log, debug, headless = false, profileDir = null },
+) {
   await page
     .goto(INSTAGRAM_ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 })
     .catch(() => {});
+
+  if (debug) {
+    try {
+      const cookies = await context.cookies(INSTAGRAM_ORIGIN);
+      const names = cookies.map((cookie) => cookie.name).sort().join(', ');
+      log(`[auth] instagram.com cookie names: ${names || '(none)'}`);
+    } catch (_error) {
+      /* diagnostics must never break the run */
+    }
+  }
 
   if (await isAuthenticated(context)) {
     log('Authenticated as existing Instagram session.');
@@ -71,6 +100,7 @@ export async function ensureAuthenticated(context, page, { timeoutMs, log, debug
   }
 
   log('No authenticated Instagram session was found.');
+  if (profileDir) log(`Profile: ${profileDir}`);
 
   // A first login needs a human and a visible window. In headless mode there
   // is no window, so fail fast instead of waiting for a login that cannot
@@ -78,9 +108,8 @@ export async function ensureAuthenticated(context, page, { timeoutMs, log, debug
   if (headless) {
     throw new AppError(
       'auth-required',
-      'No authenticated Instagram session was found.\n' +
-        'Log in once in headed mode on a machine with a GUI, then copy the\n' +
-        'browser profile to this host, or run without --headless.',
+      `No authenticated Instagram session was found in:\n  ${profileDir ?? '(default profile)'}\n` +
+        'Run once with --headed to log in, then retry.',
     );
   }
 
@@ -194,16 +223,28 @@ async function clickGateByText(page) {
 /**
  * Prepare the Story for capture:
  *   1. Click the confirmation interstitial if Instagram shows one.
- *   2. Wait until a `<video>` element exists.
+ *   2. Decide whether the active item is a video or an image.
  *
- * Without step 1 the media is never requested, so capture would find nothing.
+ * The decision order prevents a poster image from misclassifying a video:
+ *   - A `<video>` element wins immediately.
+ *   - Any MediaSource activity keeps the video path alive while the element
+ *     mounts.
+ *   - An image is accepted only after `videoGraceMs` with no video element and
+ *     no MediaSource activity.
  *
- * @returns {Promise<{ ok: boolean, gateClicks: number, videoCount: number, imageCount: number, buttonTexts: string[] }>}
+ * @returns {Promise<{ ok: boolean, kind: 'video'|'image'|null, gateClicks: number, videoCount: number, videoElements: number, imageCount: number, imageCandidates: number, imageCandidate: object|null, buttonTexts: string[] }>}
  */
-export async function prepareStory(page, { timeoutMs, log = () => {}, debug = false }) {
-  const deadline = Date.now() + timeoutMs;
+export async function prepareStory(
+  page,
+  { timeoutMs, videoGraceMs = DEFAULT_VIDEO_GRACE_MS, log = () => {}, debug = false },
+) {
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
   let gateClicks = 0;
   let buttonTexts = [];
+  let imageCandidates = 0;
+  let rememberedImage = null;
+  let rememberedImageTier = null;
 
   while (Date.now() < deadline) {
     const gate = await findStoryGate(page);
@@ -232,34 +273,170 @@ export async function prepareStory(page, { timeoutMs, log = () => {}, debug = fa
           )
           .filter(Boolean)
           .slice(0, 25);
+        const snapshot =
+          typeof window.__mseSnapshot === 'function' ? window.__mseSnapshot() : null;
+        const mediaSources = snapshot ? snapshot.mediaSources.length : 0;
+        // Preloaded neighbors can create a MediaSource without buffering any
+        // video. Only buffered video proves that a video Story is active;
+        // otherwise a preloaded neighbor would block image classification.
+        const videoBuffering = snapshot
+          ? snapshot.mediaSources.some((mediaSource) =>
+              (mediaSource.buffers ?? []).some(
+                (buffer) =>
+                  (buffer.mime || '').startsWith('video/mp4') && (buffer.chunkCount ?? 0) > 0,
+              ),
+            )
+          : false;
+        const intersectsViewport = (rect) =>
+          rect.bottom > 0 &&
+          rect.right > 0 &&
+          rect.top < (window.innerHeight || document.documentElement.clientHeight || 0) &&
+          rect.left < (window.innerWidth || document.documentElement.clientWidth || 0);
+        // Preloaded neighbor stories can keep a hidden `<video>` in the DOM.
+        // Only a visible video may force the video path, otherwise a photo
+        // Story would be misclassified.
+        const videoElements = Array.from(document.querySelectorAll('video'));
+        const visibleVideos = videoElements.filter((video) => {
+          try {
+            const rect = video.getBoundingClientRect();
+            const style = getComputedStyle(video);
+            return (
+              style.display !== 'none' &&
+              style.visibility !== 'hidden' &&
+              rect.width > 0 &&
+              rect.height > 0 &&
+              intersectsViewport(rect)
+            );
+          } catch (_error) {
+            return false;
+          }
+        }).length;
         return {
-          videos: document.querySelectorAll('video').length,
+          videos: visibleVideos,
+          videoElements: videoElements.length,
           images: document.querySelectorAll('img').length,
+          mediaSources,
+          videoBuffering,
           buttons,
         };
       })
-      .catch(() => ({ videos: 0, images: 0, buttons: [] }));
+      .catch(() => ({
+        videos: 0,
+        videoElements: 0,
+        images: 0,
+        mediaSources: 0,
+        videoBuffering: false,
+        buttons: [],
+      }));
 
     buttonTexts = state.buttons;
+
     if (state.videos > 0) {
-      return { ok: true, gateClicks, videoCount: state.videos, imageCount: state.images, buttonTexts };
+      return {
+        ok: true,
+        kind: 'video',
+        gateClicks,
+        videoCount: state.videos,
+        videoElements: state.videoElements,
+        imageCount: state.images,
+        imageCandidates,
+        buttonTexts,
+      };
     }
+
+    if (state.mediaSources === 0 || !state.videoBuffering) {
+      if (state.images > 0) {
+        const candidates = await page
+          .evaluate(() =>
+            typeof window.__snapstorySnapshotImages === 'function'
+              ? window.__snapstorySnapshotImages()
+              : [],
+          )
+          .catch(() => []);
+        imageCandidates = candidates.length;
+        const selection = selectStoryImage(candidates);
+        // Remember the first Story image during the grace period. A photo
+        // Story can advance in about five seconds, before the grace ends, so
+        // waiting to lock would capture the next item instead.
+        if (
+          selection.chosen &&
+          (!rememberedImage || (rememberedImageTier !== 'story' && selection.tier === 'story'))
+        ) {
+          rememberedImage = selection.chosen;
+          rememberedImageTier = selection.tier;
+          if (debug) {
+            log(
+              `[ui] Remembered Story image candidate id=${rememberedImage.id} tier=${selection.tier} natural=${rememberedImage.naturalWidth}x${rememberedImage.naturalHeight}.`,
+            );
+          }
+        }
+        if (rememberedImage && Date.now() - startedAt >= videoGraceMs) {
+          if (debug) {
+            log(
+              `[ui] Classified Story as image after ${Date.now() - startedAt}ms (tier ${
+                rememberedImageTier ?? 'unknown'
+              }).`,
+            );
+          }
+          return {
+            ok: true,
+            kind: 'image',
+            gateClicks,
+            videoCount: 0,
+            videoElements: state.videoElements,
+            imageCount: state.images,
+            imageCandidates,
+            imageCandidate: rememberedImage,
+            buttonTexts,
+          };
+        }
+      }
+    }
+
     await page.waitForTimeout(500);
   }
 
   const finalState = await page
-    .evaluate(() => ({
-      videos: document.querySelectorAll('video').length,
-      images: document.querySelectorAll('img').length,
-    }))
-    .catch(() => ({ videos: 0, images: 0 }));
+    .evaluate(() => {
+      const intersectsViewport = (rect) =>
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < (window.innerHeight || document.documentElement.clientHeight || 0) &&
+        rect.left < (window.innerWidth || document.documentElement.clientWidth || 0);
+      const videoElements = Array.from(document.querySelectorAll('video'));
+      const visibleVideos = videoElements.filter((video) => {
+        try {
+          const rect = video.getBoundingClientRect();
+          const style = getComputedStyle(video);
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            rect.width > 0 &&
+            rect.height > 0 &&
+            intersectsViewport(rect)
+          );
+        } catch (_error) {
+          return false;
+        }
+      }).length;
+      return {
+        videos: visibleVideos,
+        videoElements: videoElements.length,
+        images: document.querySelectorAll('img').length,
+      };
+    })
+    .catch(() => ({ videos: 0, videoElements: 0, images: 0 }));
 
   if (debug) log(`[ui] Visible buttons at timeout: ${JSON.stringify(buttonTexts)}`);
   return {
     ok: false,
+    kind: null,
     gateClicks,
     videoCount: finalState.videos,
+    videoElements: finalState.videoElements,
     imageCount: finalState.images,
+    imageCandidates,
+    imageCandidate: null,
     buttonTexts,
   };
 }
@@ -281,7 +458,16 @@ export async function startPlayback(page) {
         let visible = false;
         try {
           const rect = video.getBoundingClientRect();
-          visible = rect.width > 8 && rect.height > 8;
+          const style = getComputedStyle(video);
+          visible =
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            rect.width > 8 &&
+            rect.height > 8 &&
+            rect.bottom > 0 &&
+            rect.right > 0 &&
+            rect.top < (window.innerHeight || document.documentElement.clientHeight || 0) &&
+            rect.left < (window.innerWidth || document.documentElement.clientWidth || 0);
         } catch (_error) {
           visible = false;
         }

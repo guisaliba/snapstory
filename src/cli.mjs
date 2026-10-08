@@ -24,6 +24,12 @@ import {
   selectBuffers,
 } from './media.mjs';
 import {
+  deriveImageOutputPath,
+  downloadStoryImage,
+  extensionConflicts,
+  sanitizeImageUrl,
+} from './image.mjs';
+import {
   assertFfmpeg,
   buildRemuxArgs,
   hasFfprobe,
@@ -32,6 +38,7 @@ import {
   validateProbe,
 } from './ffmpeg.mjs';
 import {
+  DEFAULT_VIDEO_GRACE_MS,
   defaultProfileDir,
   detectStoryState,
   ensureAuthenticated,
@@ -43,12 +50,18 @@ import {
   waitForCaptureComplete,
 } from './browser.mjs';
 
-const STORY_URL = /^https?:\/\/(?:www\.)?instagram\.com\/stories\/([^/?#]+)\/(\d+)\/?(?:[?#].*)?$/i;
+const STORY_URL =
+  /^https?:\/\/(?:www\.)?instagram\.com\/stories\/([^/?#]+)(?:\/(\d+))?\/?(?:[?#].*)?$/i;
 
 /**
  * Validate a Story URL and extract its parts.
+ *
+ * Instagram sometimes keeps the address bar at `/stories/<username>/` without
+ * a story id, even while a live Story is displayed. Both forms are accepted.
+ * The id is null when it is absent.
+ *
  * @param {string} raw
- * @returns {{ url: string, username: string, storyId: string }}
+ * @returns {{ url: string, username: string, storyId: string|null }}
  */
 export function validateStoryUrl(raw) {
   if (typeof raw !== 'string' || raw.trim() === '') {
@@ -68,13 +81,16 @@ export function validateStoryUrl(raw) {
   if (!match) {
     throw new AppError(
       'invalid-url',
-      'Expected a URL like https://www.instagram.com/stories/<username>/<story-id>/',
+      'Expected a URL like https://www.instagram.com/stories/<username>/<story-id>/ or https://www.instagram.com/stories/<username>/',
     );
   }
+  const [, username, storyId] = match;
   return {
-    url: `https://www.instagram.com/stories/${match[1]}/${match[2]}/`,
-    username: match[1],
-    storyId: match[2],
+    url: storyId
+      ? `https://www.instagram.com/stories/${username}/${storyId}/`
+      : `https://www.instagram.com/stories/${username}/`,
+    username,
+    storyId: storyId ?? null,
   };
 }
 
@@ -96,6 +112,7 @@ export function parseCliArgs(argv) {
         headless: { type: 'boolean' },
         headed: { type: 'boolean' },
         timeout: { type: 'string' },
+        'device-scale-factor': { type: 'string' },
         debug: { type: 'boolean' },
         force: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
@@ -115,7 +132,8 @@ export function parseCliArgs(argv) {
       profile: null,
       keepTemp: false,
       headed: false,
-      headless: false,
+      headless: true,
+      deviceScaleFactor: 2,
       timeoutMs: 120000,
       debug: false,
       force: false,
@@ -124,6 +142,9 @@ export function parseCliArgs(argv) {
 
   if (positionals.length === 0) throw new AppError('bad-usage', 'Missing Story URL.');
   if (positionals.length > 1) throw new AppError('bad-usage', 'Expected exactly one Story URL.');
+  if (values.headed && values.headless) {
+    throw new AppError('bad-usage', 'Use either --headed or --headless, not both.');
+  }
 
   let timeoutMs = 120000;
   if (values.timeout !== undefined) {
@@ -134,6 +155,18 @@ export function parseCliArgs(argv) {
     timeoutMs = Math.round(seconds * 1000);
   }
 
+  let deviceScaleFactor = 2;
+  if (values['device-scale-factor'] !== undefined) {
+    const scale = Number(values['device-scale-factor']);
+    if (!Number.isFinite(scale) || scale <= 0 || scale > 5) {
+      throw new AppError(
+        'bad-usage',
+        '--device-scale-factor must be a number greater than 0 and at most 5.',
+      );
+    }
+    deviceScaleFactor = scale;
+  }
+
   return {
     help: false,
     url: positionals[0],
@@ -141,7 +174,8 @@ export function parseCliArgs(argv) {
     profile: values.profile ?? null,
     keepTemp: !!values['keep-temp'],
     headed: !!values.headed,
-    headless: !!values.headless,
+    headless: !values.headed,
+    deviceScaleFactor,
     timeoutMs,
     debug: !!values.debug,
     force: !!values.force,
@@ -157,11 +191,14 @@ Usage:
 Options:
   -o, --output <path>   Output file path. Default: <username>-<story-id>.mp4
       --profile <path>  Browser profile directory.
-      --headless        Run without a visible browser. Requires an existing
-                        authenticated profile.
+      --headless        Run without a visible browser. This is the default.
+                        Requires an existing authenticated profile.
       --keep-temp       Keep reconstructed video and audio files.
-      --headed          Force a visible browser (already the default).
+      --headed          Show the browser window. Use it for the first login.
       --timeout <sec>   Maximum time to wait for the Story to load and finish.
+      --device-scale-factor <n>
+                        Browser device pixel ratio (default 2). Higher values
+                        can make Instagram request larger image variants.
       --force           Overwrite the output file if it exists.
       --debug           Print detailed capture information.
   -h, --help            Show this help.
@@ -239,23 +276,6 @@ export async function main(argv, io = {}) {
     return exitCodeFor(error);
   }
 
-  try {
-    dlog(`FFmpeg: ${assertFfmpeg()}`);
-  } catch (error) {
-    err.write(`${error.message}\n`);
-    return exitCodeFor(error);
-  }
-
-  const requestedOutput = deriveOutputPath({
-    output: opts.output,
-    username: story.username,
-    storyId: story.storyId,
-  });
-  const outputPath = opts.force ? requestedOutput : nextAvailablePath(requestedOutput);
-  if (outputPath !== requestedOutput) {
-    log(`Output exists; writing to ${outputPath}`);
-  }
-
   const workDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'snapstory-'));
   dlog(`Working directory: ${workDir}`);
 
@@ -264,6 +284,7 @@ export async function main(argv, io = {}) {
     : defaultProfileDir();
   await fs.promises.mkdir(profileDir, { recursive: true });
   dlog(`Profile directory: ${profileDir}`);
+  dlog(`Browser mode: ${opts.headless ? 'headless' : 'headed'}`);
 
   const receiver = new CaptureReceiver({ workDir, debug, log: dlog });
   let context = null;
@@ -294,6 +315,7 @@ export async function main(argv, io = {}) {
       profileDir,
       headless: opts.headless,
       channel: opts.headless ? 'chromium' : undefined,
+      deviceScaleFactor: opts.deviceScaleFactor,
       debug,
     });
     await receiver.attach(context);
@@ -307,6 +329,7 @@ export async function main(argv, io = {}) {
       log,
       debug,
       headless: opts.headless,
+      profileDir,
     });
 
     await openStory(page, story.url, { timeoutMs: opts.timeoutMs });
@@ -330,20 +353,82 @@ export async function main(argv, io = {}) {
     }
 
     log('Capturing media...');
-    const prepared = await prepareStory(page, { timeoutMs: opts.timeoutMs, log, debug });
+    const prepared = await prepareStory(page, {
+      timeoutMs: opts.timeoutMs,
+      videoGraceMs: Math.min(
+        DEFAULT_VIDEO_GRACE_MS,
+        Math.max(1000, Math.floor(opts.timeoutMs / 2)),
+      ),
+      log,
+      debug,
+    });
     if (!prepared.ok) {
-      if (prepared.imageCount > 0 && prepared.videoCount === 0) {
-        throw new AppError('no-video', 'The selected Story does not contain a video.');
-      }
       throw new AppError(
-        'no-video',
-        'No Story video appeared. Instagram may show a confirmation prompt that was not recognized.\n' +
+        'no-media',
+        'The selected Story does not contain a video or an image.\n' +
           `Visible buttons: ${JSON.stringify(prepared.buttonTexts)}\n` +
           'Run with --debug and report the button labels.',
       );
     }
     if (debug) {
-      dlog(`[ui] Story prepared: gate clicks=${prepared.gateClicks}, videos=${prepared.videoCount}`);
+      dlog(
+        `[ui] Story prepared: kind=${prepared.kind}, gate clicks=${prepared.gateClicks}, videos=${prepared.videoCount} of ${prepared.videoElements}, image candidates=${prepared.imageCandidates}`,
+      );
+    }
+
+    if (prepared.kind === 'image') {
+      log('Capturing image...');
+      const image = await downloadStoryImage(context, page, {
+        timeoutMs: opts.timeoutMs,
+        quietMs: 1000,
+        pollMs: 200,
+        lockedCandidate: prepared.imageCandidate ?? null,
+        log,
+        debug,
+      });
+      const requested = deriveImageOutputPath({
+        output: opts.output,
+        username: story.username,
+        storyId: story.storyId,
+        extension: image.extension,
+      });
+      const imagePath = opts.force ? requested : nextAvailablePath(requested);
+      if (imagePath !== requested) {
+        log(`Output exists; writing to ${imagePath}`);
+      }
+      if (opts.output && extensionConflicts(requested, image.type)) {
+        log(`Warning: output extension does not match the detected ${image.type} image.`);
+      }
+      await fs.promises.mkdir(path.dirname(imagePath), { recursive: true });
+      await fs.promises.writeFile(imagePath, image.bytes);
+      if (debug) {
+        dlog(
+          `[image] fetch status=${image.status} content-type=${image.contentType} type=${image.type} bytes=${image.bytes.length} natural=${image.naturalWidth}x${image.naturalHeight}`,
+        );
+      }
+      log(
+        `Photo: ${image.type} ${formatBytes(image.bytes.length)} (${sanitizeImageUrl(image.url)})`,
+      );
+      log(`Saved: ${imagePath}`);
+      return EXIT_CODES.ok;
+    }
+
+    // FFmpeg is required only for the video path.
+    try {
+      dlog(`FFmpeg: ${assertFfmpeg()}`);
+    } catch (error) {
+      err.write(`${error.message}\n`);
+      return exitCodeFor(error);
+    }
+
+    const requestedOutput = deriveOutputPath({
+      output: opts.output,
+      username: story.username,
+      storyId: story.storyId,
+    });
+    const outputPath = opts.force ? requestedOutput : nextAvailablePath(requestedOutput);
+    if (outputPath !== requestedOutput) {
+      log(`Output exists; writing to ${outputPath}`);
     }
 
     const play = await startPlayback(page);

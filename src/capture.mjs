@@ -281,8 +281,134 @@ function mseInterceptor() {
   };
 }
 
-/** The interceptor source, wrapped as an IIFE for `addInitScript`. */
-export const INIT_SCRIPT = `(${mseInterceptor.toString()})();`;
+/**
+ * The page-side image observer.
+ *
+ * Photos do not use MSE. Instagram serves the Story photo as an `<img>` whose
+ * source is a signed CDN URL. This observer records insertion order and every
+ * `src`/`srcset` change, so the Node side can distinguish the current Story
+ * image from an avatar or a preloaded neighbor, and can see an in-place
+ * upgrade from a low-resolution placeholder to the full image.
+ *
+ * It exposes only serializable data. Scoring happens on the Node side.
+ */
+function imageObserver() {
+  'use strict';
+
+  const registry = {
+    nextId: 0,
+    records: new Map(), // HTMLImageElement -> { id, insertedAt, lastSrcChangeAt, lastUrl }
+  };
+  window.__snapstoryImages = registry;
+
+  function register(element) {
+    if (typeof HTMLImageElement === 'undefined') return;
+    if (!(element instanceof HTMLImageElement)) return;
+    if (registry.records.has(element)) return;
+    const url = element.currentSrc || element.src || '';
+    registry.records.set(element, {
+      id: registry.nextId++,
+      insertedAt: Date.now(),
+      lastSrcChangeAt: Date.now(),
+      lastUrl: url,
+    });
+  }
+
+  function registerTree(node) {
+    if (!node || node.nodeType !== 1) return;
+    if (node instanceof HTMLImageElement) register(node);
+    if (typeof node.querySelectorAll === 'function') {
+      for (const image of node.querySelectorAll('img')) register(image);
+    }
+  }
+
+  function sweep() {
+    try {
+      for (const image of document.querySelectorAll('img')) register(image);
+    } catch (_error) {
+      /* ignore */
+    }
+  }
+
+  try {
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          for (const node of mutation.addedNodes) registerTree(node);
+        } else if (mutation.type === 'attributes' && mutation.target instanceof HTMLImageElement) {
+          const record = registry.records.get(mutation.target);
+          if (!record) continue;
+          const url = mutation.target.currentSrc || mutation.target.src || '';
+          if (url !== record.lastUrl) {
+            record.lastUrl = url;
+            record.lastSrcChangeAt = Date.now();
+          }
+        }
+      }
+    });
+    observer.observe(document, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['src', 'srcset'],
+    });
+  } catch (_error) {
+    /* ignore */
+  }
+
+  sweep();
+  try {
+    document.addEventListener('DOMContentLoaded', sweep, { once: true });
+  } catch (_error) {
+    /* ignore */
+  }
+
+  window.__snapstorySnapshotImages = function () {
+    sweep();
+    const out = [];
+    for (const [element, record] of registry.records) {
+      let rect = { width: 0, height: 0, top: 0, left: 0, bottom: 0, right: 0 };
+      let visible = false;
+      try {
+        rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        // A translated carousel neighbor can keep a nonzero rectangle while it
+        // sits fully outside the viewport. Require an actual intersection.
+        const intersectsViewport =
+          rect.bottom > 0 &&
+          rect.right > 0 &&
+          rect.top < viewportHeight &&
+          rect.left < viewportWidth;
+        visible =
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          rect.width > 0 &&
+          rect.height > 0 &&
+          intersectsViewport;
+      } catch (_error) {
+        visible = false;
+      }
+      out.push({
+        id: record.id,
+        url: element.currentSrc || element.src || record.lastUrl || '',
+        naturalWidth: element.naturalWidth || 0,
+        naturalHeight: element.naturalHeight || 0,
+        renderedWidth: Math.round(rect.width),
+        renderedHeight: Math.round(rect.height),
+        visible,
+        complete: !!element.complete,
+        insertedAt: record.insertedAt,
+        lastSrcChangeAt: record.lastSrcChangeAt,
+      });
+    }
+    return out;
+  };
+}
+
+/** The interceptor source, wrapped as IIFEs for `addInitScript`. */
+export const INIT_SCRIPT = `(${mseInterceptor.toString()})();(${imageObserver.toString()})();`;
 
 /**
  * Writes chunks to a stream in sequence order.
