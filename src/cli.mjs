@@ -297,6 +297,7 @@ export async function main(argv, io = {}) {
       log,
       debug,
       headless: opts.headless,
+      profileDir,
     });
 
     await openStory(page, story.url, { timeoutMs: opts.timeoutMs });

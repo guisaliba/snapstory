@@ -13,7 +13,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/unit.test.mjs test/remux.test.mjs test/mse-fixture.test.mjs test/story-gate.test.mjs test/image.test.mjs test/image-fixture.test.mjs",
+    "test": "node --test test/unit.test.mjs test/remux.test.mjs test/mse-fixture.test.mjs test/story-gate.test.mjs test/image.test.mjs test/image-fixture.test.mjs test/auth.test.mjs",
     "test:unit": "node --test test/unit.test.mjs",
     "test:mse": "node --test test/mse-fixture.test.mjs",
     "test:instagram": "node test/instagram.integration.mjs"

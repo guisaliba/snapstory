@@ -68,10 +68,24 @@ export async function isAuthenticated(context) {
  * Instagram, tells the user to log in, and polls until the session cookie
  * appears, so the same run continues automatically.
  */
-export async function ensureAuthenticated(context, page, { timeoutMs, log, debug, headless = false }) {
+export async function ensureAuthenticated(
+  context,
+  page,
+  { timeoutMs, log, debug, headless = false, profileDir = null },
+) {
   await page
     .goto(INSTAGRAM_ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 })
     .catch(() => {});
+
+  if (debug) {
+    try {
+      const cookies = await context.cookies(INSTAGRAM_ORIGIN);
+      const names = cookies.map((cookie) => cookie.name).sort().join(', ');
+      log(`[auth] instagram.com cookie names: ${names || '(none)'}`);
+    } catch (_error) {
+      /* diagnostics must never break the run */
+    }
+  }
 
   if (await isAuthenticated(context)) {
     log('Authenticated as existing Instagram session.');
@@ -79,6 +93,7 @@ export async function ensureAuthenticated(context, page, { timeoutMs, log, debug
   }
 
   log('No authenticated Instagram session was found.');
+  if (profileDir) log(`Profile: ${profileDir}`);
 
   // A first login needs a human and a visible window. In headless mode there
   // is no window, so fail fast instead of waiting for a login that cannot
@@ -86,9 +101,8 @@ export async function ensureAuthenticated(context, page, { timeoutMs, log, debug
   if (headless) {
     throw new AppError(
       'auth-required',
-      'No authenticated Instagram session was found.\n' +
-        'Log in once in headed mode on a machine with a GUI, then copy the\n' +
-        'browser profile to this host, or run without --headless.',
+      `No authenticated Instagram session was found in:\n  ${profileDir ?? '(default profile)'}\n` +
+        'Log in once in headed mode with the same --profile, then retry headless.',
     );
   }
 
