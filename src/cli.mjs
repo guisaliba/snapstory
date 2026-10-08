@@ -123,7 +123,7 @@ export function parseCliArgs(argv) {
       profile: null,
       keepTemp: false,
       headed: false,
-      headless: false,
+      headless: true,
       deviceScaleFactor: 1,
       timeoutMs: 120000,
       debug: false,
@@ -133,6 +133,9 @@ export function parseCliArgs(argv) {
 
   if (positionals.length === 0) throw new AppError('bad-usage', 'Missing Story URL.');
   if (positionals.length > 1) throw new AppError('bad-usage', 'Expected exactly one Story URL.');
+  if (values.headed && values.headless) {
+    throw new AppError('bad-usage', 'Use either --headed or --headless, not both.');
+  }
 
   let timeoutMs = 120000;
   if (values.timeout !== undefined) {
@@ -162,7 +165,7 @@ export function parseCliArgs(argv) {
     profile: values.profile ?? null,
     keepTemp: !!values['keep-temp'],
     headed: !!values.headed,
-    headless: !!values.headless,
+    headless: !values.headed,
     deviceScaleFactor,
     timeoutMs,
     debug: !!values.debug,
@@ -179,10 +182,10 @@ Usage:
 Options:
   -o, --output <path>   Output file path. Default: <username>-<story-id>.mp4
       --profile <path>  Browser profile directory.
-      --headless        Run without a visible browser. Requires an existing
-                        authenticated profile.
+      --headless        Run without a visible browser. This is the default.
+                        Requires an existing authenticated profile.
       --keep-temp       Keep reconstructed video and audio files.
-      --headed          Force a visible browser (already the default).
+      --headed          Show the browser window. Use it for the first login.
       --timeout <sec>   Maximum time to wait for the Story to load and finish.
       --device-scale-factor <n>
                         Browser device pixel ratio (default 1). Higher values
@@ -272,6 +275,7 @@ export async function main(argv, io = {}) {
     : defaultProfileDir();
   await fs.promises.mkdir(profileDir, { recursive: true });
   dlog(`Profile directory: ${profileDir}`);
+  dlog(`Browser mode: ${opts.headless ? 'headless' : 'headed'}`);
 
   const receiver = new CaptureReceiver({ workDir, debug, log: dlog });
   let context = null;

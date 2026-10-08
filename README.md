@@ -102,9 +102,9 @@ Options:
 | --- | --- |
 | `-o, --output <path>` | Output file path. Default: `<username>-<story-id>.mp4` |
 | `--profile <path>` | Browser profile directory. |
-| `--headless` | Run without a visible browser. Requires an authenticated profile. |
+| `--headless` | Run without a visible browser. This is the default. Requires an authenticated profile. |
 | `--keep-temp` | Keep the reconstructed video and audio files. |
-| `--headed` | Force a visible browser (already the default). |
+| `--headed` | Show the browser window. Use it for the first login. |
 | `--timeout <seconds>` | Maximum time to wait for the Story to load and finish. |
 | `--device-scale-factor <n>` | Browser device pixel ratio (default 1). Higher values can make Instagram request larger image variants. |
 | `--force` | Overwrite the output file if it exists. |
@@ -134,20 +134,28 @@ No audio track detected. Saved video-only Story.
 
 ## First login
 
-`snapstory` does not ask for your Instagram password. It uses a persistent
-browser profile. The default location is:
+`snapstory` runs **headless by default**. It does not ask for your Instagram
+password. It uses a persistent browser profile. The default location is:
 
 ```text
 ${XDG_DATA_HOME:-$HOME/.local/share}/snapstory/profile
 ```
 
-On the first run:
+The first login needs a visible window, so run once with `--headed`:
 
-1. Chromium opens in headed mode at `instagram.com`.
+```bash
+snapstory '<story-url>' --headed
+```
+
+On that first run:
+
+1. Chromium opens at `instagram.com`.
 2. If no session exists, you log in manually.
 3. `snapstory` detects the new session and continues automatically.
 
-Later runs reuse the saved session.
+Later runs need no flag and reuse the saved session headless. If a headless run
+finds no session, it exits with the profile path and the exact command to run
+with `--headed`.
 
 ## Story images
 
@@ -178,7 +186,7 @@ snapstory 'https://www.instagram.com/stories/highlights/<id>/'
 
 ## Headless and remote hosts
 
-`--headless` runs without a visible window, which is useful on a remote host
+Headless is the default, which is what makes the tool usable on a remote host
 with no GUI. It requires an **existing authenticated profile**, because the
 first login needs a human and a visible browser.
 
@@ -190,8 +198,8 @@ cd snapstory
 npm install
 npx playwright install chromium
 
-# Log in once in headed mode. The session is saved when the run ends.
-./bin/snapstory 'https://www.instagram.com/stories/<user>/<id>/' --keep-temp
+# Log in once with a visible window. The session is saved when the run ends.
+./bin/snapstory 'https://www.instagram.com/stories/<user>/<id>/' --headed --keep-temp
 ```
 
 The profile is written to:
@@ -211,10 +219,10 @@ ssh user@remote 'mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/snapstory" \
   && rm -f /tmp/snapstory-profile.tgz'
 ```
 
-Then run headless on the remote host:
+Then run on the remote host (headless is the default):
 
 ```bash
-snapstory '<story-url>' --headless --debug
+snapstory '<story-url>' --debug
 ```
 
 Headless mode uses Playwright's new headless mode, which is a full Chrome build.
@@ -310,8 +318,9 @@ npm run test:instagram -- 'https://www.instagram.com/stories/<user>/<id>/'
   signed CDN URL cannot be edited to request a larger size.
 - Carousels are not supported. Only the active Story item is saved.
 - The tool depends on the MSE behavior currently observed on Instagram.
-- A headed browser is used by default because headless Chromium is less
-  reliable for Instagram playback and capture.
+- Headless is the default. The headless path has been validated for login
+  persistence, playback, capture, and audio on real sessions, but Instagram can
+  still change its behavior.
 
 ## License
 

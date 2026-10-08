@@ -48,6 +48,7 @@ test('parseCliArgs parses the URL and every option', () => {
   assert.equal(opts.profile, '/tmp/p');
   assert.equal(opts.keepTemp, true);
   assert.equal(opts.headed, true);
+  assert.equal(opts.headless, false);
   assert.equal(opts.timeoutMs, 30000);
   assert.equal(opts.debug, true);
   assert.equal(opts.force, true);
@@ -69,9 +70,22 @@ test('parseCliArgs parses --headless', () => {
   assert.equal(opts.headless, true);
 });
 
-test('parseCliArgs defaults --headless to false', () => {
+test('parseCliArgs defaults to headless', () => {
   const opts = parseCliArgs(['https://www.instagram.com/stories/example/123/']);
-  assert.equal(opts.headless, false);
+  assert.equal(opts.headless, true);
+  assert.equal(opts.headed, false);
+});
+
+test('parseCliArgs rejects --headed together with --headless', () => {
+  assert.throws(
+    () =>
+      parseCliArgs([
+        'https://www.instagram.com/stories/example/123/',
+        '--headed',
+        '--headless',
+      ]),
+    (error) => error.code === 'bad-usage',
+  );
 });
 
 test('parseCliArgs rejects a non-numeric timeout', () => {

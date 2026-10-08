@@ -109,7 +109,7 @@ export async function ensureAuthenticated(
     throw new AppError(
       'auth-required',
       `No authenticated Instagram session was found in:\n  ${profileDir ?? '(default profile)'}\n` +
-        'Log in once in headed mode with the same --profile, then retry headless.',
+        'Run once with --headed to log in, then retry.',
     );
   }
 
