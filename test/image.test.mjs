@@ -280,6 +280,20 @@ test('selectStoryImage breaks ties by recency', () => {
   assert.equal(result.chosen.id, 2);
 });
 
+test('selectStoryImage diagnostics report srcset coverage', () => {
+  const withSrcset = candidate({ id: 1, srcset: 'a.jpg 320w, b.jpg 1080w' });
+  const without = candidate({ id: 2, url: taggedUrl('STORY.xpids.1440.sdr.regular_photo.C3') });
+  const result = selectStoryImage([withSrcset, without]);
+
+  const withDescriptors = result.diagnostics.find((line) => line.id === 1);
+  assert.equal(withDescriptors.srcsetEmpty, false);
+  assert.equal(withDescriptors.srcsetEntries, 2);
+
+  const withoutDescriptors = result.diagnostics.find((line) => line.id === 2);
+  assert.equal(withoutDescriptors.srcsetEmpty, true);
+  assert.equal(withoutDescriptors.srcsetEntries, 0);
+});
+
 test('selectStoryImage returns none when every candidate is invalid', () => {
   const result = selectStoryImage([
     candidate({ id: 1, naturalWidth: 0, naturalHeight: 0 }),

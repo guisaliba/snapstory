@@ -130,6 +130,11 @@ export function extensionForType(type) {
  * Pick the best URL for a chosen candidate. Prefers the largest `w`
  * descriptor, then the largest `x` density above 1, then `currentSrc`.
  *
+ * Precaution, not observed behavior: live evidence from one image Story showed
+ * an empty `srcset` on every `<img>`, so this returns `currentSrc` there. Keep
+ * this branch only while the `--debug` "srcset summary" line can report a
+ * non-empty value; otherwise it is dead code and can be removed.
+ *
  * @param {{ url?: string, srcset?: string }} candidate
  */
 export function resolveBestImageUrl(candidate) {
@@ -199,6 +204,8 @@ export function selectStoryImage(candidates, options = {}) {
     rendered: `${candidate.renderedWidth ?? 0}x${candidate.renderedHeight ?? 0}`,
     visible: !!candidate.visible,
     lastSrcChangeAt: candidate.lastSrcChangeAt ?? 0,
+    srcsetEmpty: !(candidate.srcset ?? '').trim(),
+    srcsetEntries: parseSrcset(candidate.srcset ?? '').length,
   }));
 
   const story = list.filter((candidate) => candidateTier(candidate) === 'story');
@@ -270,6 +277,27 @@ function finalizeCandidate(candidate) {
 }
 
 /**
+ * Print the candidate table and a grep-friendly srcset summary in debug mode.
+ * The summary is the evidence used to decide whether the srcset branch is
+ * worth keeping.
+ */
+function logImageCandidates(log, diagnostics) {
+  for (const line of diagnostics) {
+    log(
+      `[image] candidate id=${line.id} tier=${line.tier} visible=${line.visible} natural=${line.natural} rendered=${line.rendered} srcset=${
+        line.srcsetEmpty ? 'empty' : `${line.srcsetEntries} entries`
+      } recency=${line.lastSrcChangeAt} url=${line.url}`,
+    );
+  }
+  const empty = diagnostics.filter((line) => line.srcsetEmpty).length;
+  log(
+    `[image] srcset summary: total=${diagnostics.length} empty=${empty} nonEmpty=${
+      diagnostics.length - empty
+    }`,
+  );
+}
+
+/**
  * Lock the active Story image and wait until it settles.
  *
  * Locking by registry id is what prevents a switch to the next carousel item.
@@ -308,6 +336,7 @@ export async function lockAndSettleStoryImage(page, options = {}) {
       lastSignature = signatureOf(locked);
       quietSince = Date.now();
       if (debug) {
+        logImageCandidates(log, selection.diagnostics);
         log(
           `[image] locked candidate id=${locked.id} tier=${selection.tier} ${sanitizeImageUrl(
             locked.url,
