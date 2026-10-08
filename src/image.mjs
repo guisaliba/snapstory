@@ -102,6 +102,9 @@ export function extensionForType(type) {
 export function sanitizeImageUrl(url) {
   try {
     const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return `(${parsed.protocol.replace(':', '')} URL)`;
+    }
     return `${parsed.origin}${parsed.pathname}`;
   } catch (_error) {
     return '(unparseable url)';

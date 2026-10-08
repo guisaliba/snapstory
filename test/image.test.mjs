@@ -136,6 +136,11 @@ test('sanitizeImageUrl removes the signed query string', () => {
   assert.equal(safe, 'https://host.example/v/t51/photo.jpg');
 });
 
+test('sanitizeImageUrl shortens data and blob URLs', () => {
+  assert.equal(sanitizeImageUrl('data:image/png;base64,AAAA'), '(data URL)');
+  assert.equal(sanitizeImageUrl('blob:https://www.instagram.com/abc'), '(blob URL)');
+});
+
 test('sanitizeImageUrl handles unparseable input', () => {
   assert.equal(sanitizeImageUrl('not a url'), '(unparseable url)');
 });
