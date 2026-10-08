@@ -1,7 +1,7 @@
 {
   "name": "snapstory",
   "version": "0.1.0",
-  "description": "Download Instagram Story videos, including audio, by capturing Media Source Extensions data in a real browser.",
+  "description": "Download Instagram Story videos (with audio) or photos by capturing the media a real browser receives.",
   "type": "module",
   "bin": {
     "snapstory": "./bin/snapstory"

@@ -1,63 +1,50 @@
 # snapstory
 
-Download an Instagram Story video (including its audio) or a Story photo by
-capturing the media the browser receives.
+Download an Instagram Story **video (with audio)** or a Story **photo** from a
+real, authenticated browser session.
 
-## What it does
+Instagram rarely exposes a direct MP4 or image URL. Videos play through Media
+Source Extensions (MSE), with separate video and audio `SourceBuffer` objects.
+Photos are served as signed CDN images. `snapstory` opens the Story in a real
+Chromium session, captures what the browser receives, and saves a normal file.
+Media is never re-encoded: FFmpeg only remuxes the container for videos, and
+photos need no FFmpeg at all.
 
-Instagram does not always expose one public MP4 URL for a Story video. The
-video element often uses a Blob URL such as:
+**Scope:** one Story item per run. An id-less URL captures the currently
+displayed item. Carousels are not supported.
 
-```text
-blob:https://www.instagram.com/<uuid>
+## Quick start
+
+```bash
+git clone https://github.com/guisaliba/snapstory.git
+cd snapstory
+npm install
+npx playwright install chromium
+
+# First login once, with a visible window:
+./bin/snapstory 'https://www.instagram.com/stories/example/123456789/' --headed
+
+# Later runs are headless:
+./bin/snapstory 'https://www.instagram.com/stories/example/123456789/'
 ```
 
-That Blob URL is not an HTTP link to the original media. Internally,
-Instagram creates a `MediaSource`, creates separate `SourceBuffer` objects for
-video and audio, and appends fragmented MP4 data to them.
-
-`snapstory`:
-
-1. Opens the Story in a real Chromium browser with your authenticated session.
-2. Clicks the Instagram confirmation prompt that blocks Story media, when one
-   appears.
-3. Installs an interceptor **before** Instagram creates its `MediaSource`
-   objects.
-4. Captures every `SourceBuffer.appendBuffer()` payload.
-5. Identifies the video and audio buffers by MIME type — never by buffer number.
-6. Keeps every chunk in its original append order.
-7. Reconstructs the fragmented MP4 video and audio streams.
-8. Remuxes them into one normal `.mp4` file with FFmpeg, using stream copy.
-9. Validates the result and cleans up temporary files.
-
-When the Story is a **photo**, no MediaSource exists. `snapstory` finds the
-active Story image in the page, rejects avatars and preloaded neighbors, waits
-for the image to settle, fetches the signed CDN URL through the same
-authenticated browser context, and saves the original bytes. Photos do not
-require FFmpeg.
-
-The video and audio are **never re-encoded**. FFmpeg only changes the container.
-
-This tool automates the observed Instagram media behavior: MSE for videos and
-signed CDN images for photos. It does not support every media format Instagram
-can serve; it relies on the behavior currently observed for Story items.
+`./bin/snapstory` runs straight from the checkout. No global install is needed.
+Video Stories also need FFmpeg on `PATH`; photos do not.
 
 ## Requirements
 
-- Node.js 20.11 or newer
-- npm
-- FFmpeg and FFprobe (required for video Stories; not needed for photos)
+- Node.js 20.11 or newer and npm
 - Chromium, installed through Playwright
+- FFmpeg and FFprobe (video Stories only)
 - An Instagram account with access to the Story
 
 ## Installation
 
 ```bash
-git clone <your-repo-url> snapstory
+git clone https://github.com/guisaliba/snapstory.git
 cd snapstory
 npm install
 npx playwright install chromium
-npm link
 ```
 
 Install FFmpeg:
@@ -66,20 +53,35 @@ Install FFmpeg:
 # Arch Linux
 sudo pacman -S ffmpeg
 
-# macOS (Homebrew)
-brew install ffmpeg
-
 # Debian or Ubuntu
 sudo apt install ffmpeg
+
+# macOS (Homebrew)
+brew install ffmpeg
 ```
 
-After `npm link`, the `snapstory` command is available everywhere.
+### Use the `snapstory` command anywhere (optional)
+
+The checkout works as-is. To get the bare `snapstory` command on your `PATH`:
+
+```bash
+npm link          # symlinks this checkout; good for development
+# or
+npm install -g .  # installs a global copy from this source
+```
+
+Remove it with `npm unlink -g snapstory` or `npm uninstall -g snapstory`.
+Publishing to a registry would remove the clone step entirely
+(`npm install -g snapstory`, `npx snapstory`), but requires a publish and is not
+needed to use the tool.
 
 ## Usage
 
 ```bash
-snapstory '<story-url>'
+snapstory '<story-url>' [options]
 ```
+
+From the checkout, use `./bin/snapstory` instead of the bare command.
 
 Accepted Story URL forms:
 
@@ -89,10 +91,9 @@ https://www.instagram.com/stories/<username>/
 https://www.instagram.com/stories/highlights/<highlight-id>/
 ```
 
-Instagram sometimes keeps the address bar at `/stories/<username>/` without a
-story id, even while a live Story is displayed. `snapstory` accepts both forms.
-When the id is absent, it captures the currently displayed Story item and names
-the file `<username>.<ext>`.
+Instagram sometimes keeps the address bar at `/stories/<username>/` with no
+story id, even while a live Story is displayed. Both forms are accepted. With no
+id, the currently displayed item is captured.
 
 Example:
 
@@ -102,25 +103,30 @@ snapstory \
   -o ~/Downloads/story.mp4
 ```
 
-Options:
-
 | Option | Meaning |
 | --- | --- |
-| `-o, --output <path>` | Output file path. Default: `<username>-<story-id>.mp4` |
-| `--profile <path>` | Browser profile directory. |
-| `--headless` | Run without a visible browser. This is the default. Requires an authenticated profile. |
-| `--keep-temp` | Keep the reconstructed video and audio files. |
+| `-o, --output <path>` | Output file path. Defaults below. |
+| `--profile <path>` | Browser profile directory. Default: `${XDG_DATA_HOME:-$HOME/.local/share}/snapstory/profile`. |
+| `--headless` | Run without a visible browser. Default. Requires an authenticated profile. |
 | `--headed` | Show the browser window. Use it for the first login. |
-| `--timeout <seconds>` | Maximum time to wait for the Story to load and finish. |
-| `--device-scale-factor <n>` | Browser device pixel ratio (default 2). Higher values can make Instagram request larger image variants. |
+| `--keep-temp` | Keep reconstructed temporary files. `--debug` also keeps them. |
+| `--timeout <seconds>` | Maximum wait for the Story to load and finish. Default 120. |
+| `--device-scale-factor <n>` | Browser device pixel ratio. Default 2. Higher values can make Instagram serve larger photos. |
 | `--force` | Overwrite the output file if it exists. |
 | `--debug` | Print detailed capture information. |
 | `-h, --help` | Show usage. |
 
-If the output file already exists and `--force` is absent, `snapstory` writes to
-a unique name such as `story-1.mp4`. It never overwrites silently.
+Default file names:
 
-### Typical output
+- `<username>-<story-id>.<ext>` when both parts are known
+- `<username>.<ext>` when the URL has no story id
+- `story.<ext>` when neither is known
+- If the file exists and `--force` is absent, a `-1`, `-2`, ... suffix is added.
+  `snapstory` never overwrites silently.
+
+## What to expect
+
+A video Story with audio:
 
 ```text
 Opening Story...
@@ -129,19 +135,34 @@ Capturing media...
 Video: 14 chunks, 3.8 MB
 Audio: 9 chunks, 312 KB
 Remuxing...
-Saved: /home/user/Downloads/example-123456789.mp4
+Saved: /home/user/example-123456789.mp4
 ```
 
-A Story without audio still produces a valid MP4 and prints:
+A video Story without audio still produces a valid MP4 and adds:
 
 ```text
 No audio track detected. Saved video-only Story.
 ```
 
+A photo Story:
+
+```text
+Opening Story...
+Authenticated as existing Instagram session.
+Capturing media...
+Capturing image...
+Photo: jpeg 35 KB (https://instagram.fmcz2-1.fna.fbcdn.net/v/t51.../photo.jpg)
+Saved: /home/user/example-123456789.jpg
+```
+
+Success markers to confirm the tool worked: a `Video:`/`Audio:` or `Photo:` line
+with non-zero counts or bytes, `Remuxing...` for videos, and a `Saved:` line
+whose file opens normally.
+
 ## First login
 
-`snapstory` runs **headless by default**. It does not ask for your Instagram
-password. It uses a persistent browser profile. The default location is:
+`snapstory` runs **headless by default** and never asks for your Instagram
+password. It uses a persistent browser profile:
 
 ```text
 ${XDG_DATA_HOME:-$HOME/.local/share}/snapstory/profile
@@ -153,54 +174,41 @@ The first login needs a visible window, so run once with `--headed`:
 snapstory '<story-url>' --headed
 ```
 
-On that first run:
+If no session exists, Chromium opens, you log in manually, and the same run
+continues. Later runs reuse the session headless. A headless run with no session
+exits with code 3 and prints the profile path and the exact `--headed` command.
+Use the same `--profile` path for the login run and all later runs.
 
-1. Chromium opens at `instagram.com`.
-2. If no session exists, you log in manually.
-3. `snapstory` detects the new session and continues automatically.
+## Photos
 
-Later runs need no flag and reuse the saved session headless. If a headless run
-finds no session, it exits with the profile path and the exact command to run
-with `--headed`.
-
-## Story images
-
-When the active Story item is a photo, `snapstory` saves it as an image file.
-
-```bash
-snapstory 'https://www.instagram.com/stories/highlights/<id>/'
-# Saved: /path/<username>-<story-id>.jpg
-```
-
-- Photos do not use MSE. The tool identifies the Story image in the page,
-  rejects the profile avatar and preloaded neighbors, waits for the image to
-  settle, then fetches the signed CDN URL through the authenticated context.
+- Photos do not use MSE. The tool identifies the active Story image, rejects the
+  profile avatar and preloaded neighbors, waits for the image to settle, then
+  fetches the signed CDN URL through the authenticated context.
 - It saves the **original bytes**. JPEG, PNG, WebP, GIF, HEIC, and AVIF are
-  detected from magic bytes, not from the URL extension.
-- Without `--output`, the extension comes from the detected type. With
-  `--output`, the path is honored exactly, and a warning appears when its
-  extension disagrees with the detected type.
-- FFmpeg is not required for image Stories.
-- Resolution is limited to what Instagram serves to the page. The CDN URL is
-  signed; changing a size parameter is rejected with `403`. The default device
-  pixel ratio is 2, which makes Instagram serve a larger variant: live testing
-  measured 480×853 at ratio 1 and 1179×2096 at ratio 2 on the same Story. Ratio
-  3 gave the same variant as 2. Use `--device-scale-factor 1` for the old
-  behavior.
-- Only the active item is saved. Carousels are not yet supported.
-- Signed URLs are treated as temporary secrets and are printed with the query
-  string removed.
+  detected from magic bytes, not from the URL.
+- With `--output`, the path is honored exactly, and a warning appears if its
+  extension disagrees with the detected type. Without `--output`, the extension
+  comes from the detected type.
+- FFmpeg is not required for photos.
+- Resolution is limited to what Instagram serves to the page. The signed URL
+  cannot be edited; changing a size parameter returns `403`. The default device
+  pixel ratio of 2 makes Instagram serve a larger variant: live testing measured
+  480×853 at ratio 1 and 1179×2096 at ratio 2 on the same Story. Ratio 3 gave the
+  same variant as 2. Use `--device-scale-factor 1` for the old behavior.
+- Only the active item is saved.
+- Signed image URLs are temporary secrets. Logs print them without the query
+  string.
 
-## Headless and remote hosts
+## Remote and headless hosts
 
-Headless is the default, which is what makes the tool usable on a remote host
-with no GUI. It requires an **existing authenticated profile**, because the
-first login needs a human and a visible browser.
+Headless is the default, which makes the tool usable on a host with no GUI. It
+requires an **existing authenticated profile**, because the first login needs a
+human and a visible browser.
 
 Seed the profile on a device with a GUI:
 
 ```bash
-git clone <your-repo-url> snapstory
+git clone https://github.com/guisaliba/snapstory.git
 cd snapstory
 npm install
 npx playwright install chromium
@@ -209,13 +217,7 @@ npx playwright install chromium
 ./bin/snapstory 'https://www.instagram.com/stories/<user>/<id>/' --headed --keep-temp
 ```
 
-The profile is written to:
-
-```text
-${XDG_DATA_HOME:-$HOME/.local/share}/snapstory/profile
-```
-
-Copy it to the remote host over SSH:
+Copy the profile to the remote host over SSH:
 
 ```bash
 tar -C "${XDG_DATA_HOME:-$HOME/.local/share}/snapstory" -czf snapstory-profile.tgz profile
@@ -226,65 +228,62 @@ ssh user@remote 'mkdir -p "${XDG_DATA_HOME:-$HOME/.local/share}/snapstory" \
   && rm -f /tmp/snapstory-profile.tgz'
 ```
 
-Then run on the remote host (headless is the default):
+Then run on the remote host:
 
 ```bash
 snapstory '<story-url>' --debug
 ```
 
-Headless mode uses Playwright's new headless mode, which is a full Chrome build.
-Instagram is more likely to serve its normal player to it than to the older
-headless shell. Reliability is still not guaranteed, so use `--debug` and check
-the capture diagnostics.
-
-Use the **same profile** for seeding and for every later run. The default is
-`${XDG_DATA_HOME:-$HOME/.local/share}/snapstory/profile`; pass `--profile` only
-when the seeding run used the same path. When authentication fails, the error
+Headless mode uses Playwright's new headless mode, a full Chrome build.
+Reliability is not guaranteed because Instagram can change its behavior, so use
+`--debug` and check the capture lines. When authentication fails, the error
 names the resolved profile directory, and `--debug` lists the visible
 `instagram.com` cookie names (names only, never values).
 
+## Troubleshooting
+
+Confirm the environment before a run:
+
+```bash
+./bin/snapstory --help
+npx playwright install chromium     # once
+ffmpeg -version && ffprobe -version # video Stories
+```
+
+Exit codes and what to do:
+
+| Exit | Message starts with | Meaning and action |
+| --- | --- | --- |
+| 2 | `Only instagram.com Story URLs...` or `Expected a URL like...` | Invalid URL. Use one of the accepted forms. |
+| 2 | `FFmpeg was not found...` | Install FFmpeg, or download a photo Story. |
+| 3 | `No authenticated Instagram session was found in: <profile>` | Run once with `--headed` and the same `--profile`. |
+| 4 | `The Story is unavailable or has expired.` | The Story is gone. It cannot be downloaded. |
+| 5 | `The current Instagram account cannot access this Story.` | Use an account that can see the Story. |
+| 6 | `The selected Story does not contain a video or an image.` | Retry. If it repeats, run `--debug` and report the printed button labels. |
+| 7 | `No video media was captured...`, `Capture started after...`, `The video SourceBuffer captured zero bytes`, `Several MediaSource...` | Capture failed or was incomplete. Retry with `--debug` and report the diagnostics. |
+| 7 | `Could not download the Story image (HTTP 403).` | The signed URL was rejected or expired. Retry. |
+| 8 | `FFmpeg failed...` | Remux failed. FFmpeg stderr is printed. Run with `--debug` to keep the reconstructed files and report them. |
+| 8 | `Expected exactly one video stream...` or a zero duration | The output failed validation. Report with `--debug`. |
+| 9 | `Timed out while waiting...` | The Story was slow or blocked. Retry, raise `--timeout`, or report with `--debug`. |
+| 130 | `Received SIGINT` | Interrupted. Temporary files are cleaned. |
+
+If behavior looks wrong:
+
+1. Re-run with `--debug`. It prints the browser mode, the profile directory, the
+   cookie names, candidate media, buffer choices, and the FFmpeg command, and it
+   keeps the temporary files. Temporary paths are printed at the end.
+2. Check the success markers above. A run that does not print `Saved:` failed.
+3. Open an issue at https://github.com/guisaliba/snapstory/issues with the
+   command, the `--debug` output, and what you expected. Logs strip signed query
+   strings, so the output is safe to paste.
+4. Never attach the browser profile, cookies, or a downloaded Story.
+
 ## Security
 
-The browser profile contains cookies and other sensitive login state. It is
-stored outside the repository and is listed in `.gitignore`. Never commit or
-share it. `snapstory` prints no cookies, tokens, or authorization headers, runs
-fully on your machine, and includes no telemetry.
-
-## How it works
-
-```
-  Instagram Story
-        |
-        v
-  HTMLVideoElement  <-- blob: URL
-        |
-        v
-  MediaSource
-        |
-        +---- video/mp4 SourceBuffer  (init segment + media fragments)
-        +---- audio/mp4 SourceBuffer  (init segment + media fragments)
-        |
-        v
-  exact bytes captured via Playwright bindings
-        |
-        +---- video fragmented MP4
-        +---- audio fragmented MP4
-        |
-        v
-  ffmpeg -c copy
-        |
-        v
-  final Story MP4
-```
-
-The correct buffer is chosen by MIME type and by `MediaSource` identity. The
-interceptor records the Blob URL that each `MediaSource` receives, so the tool
-can match the currently playing `<video>` element to its `MediaSource`. This
-prevents capturing a preloaded previous or next Story.
-
-Chunks are copied at append time, given a sequence number, and sent to Node as
-base64 blocks. Node writes each buffer to its own temporary file in exact
-sequence order.
+The browser profile contains cookies and other sensitive login state. It lives
+outside the repository and is listed in `.gitignore`. Never commit or share it.
+`snapstory` prints no cookies, tokens, or authorization headers, runs fully on
+your machine, and includes no telemetry. Downloaded Stories stay local.
 
 ## Tests
 
@@ -292,24 +291,21 @@ sequence order.
 npm test
 ```
 
-The suite runs without Instagram and without a browser login:
+The suite needs no Instagram account:
 
-- **Unit tests** — argument parsing, URL validation, MIME classification,
-  buffer selection, ordered assembly, fragmented-MP4 box inspection, output
-  naming, and FFmpeg command construction.
-- **Remux test** — generates real fragmented media and remuxes it through the
-  same FFmpeg path the CLI uses.
-- **MSE fixture test** — loads a local page in headless Chromium that uses
-  `MediaSource` and `SourceBuffer`, then proves the interceptor captures video
-  and audio bytes byte-for-byte.
-- **Image tests** — unit tests for type detection, selection, and naming;
-  browser tests for the image observer, the settle wait through a placeholder
-  upgrade, and the authenticated fetch round-trip.
+- Unit tests: argument parsing, URL validation, MIME classification, buffer
+  selection, ordered assembly, fragmented-MP4 inspection, image detection,
+  naming, and FFmpeg argument construction.
+- Remux test: generates fragmented media and remuxes it through the same FFmpeg
+  path the CLI uses.
+- MSE fixture test: proves the interceptor captures video and audio bytes
+  byte-for-byte in headless Chromium.
+- Image tests: observer, selection, placeholder upgrade through the settle wait,
+  and the authenticated fetch round-trip.
+- Auth tests: headless fail-fast names the profile, and cookie values never
+  reach the log.
 
-### Manual Instagram test
-
-This test needs a live, authenticated session and a currently available Story.
-It is not part of `npm test` and must not run in public CI.
+Manual live check (needs an authenticated profile):
 
 ```bash
 npm run test:instagram -- 'https://www.instagram.com/stories/<user>/<id>/'
@@ -319,15 +315,32 @@ npm run test:instagram -- 'https://www.instagram.com/stories/<user>/<id>/'
 
 - Expired Stories cannot be downloaded.
 - The logged-in account must have access to the Story.
-- Instagram can change its media implementation at any time, which can break
-  MSE capture or image discovery.
-- Photo resolution is limited to the size Instagram serves to the page. The
-  signed CDN URL cannot be edited to request a larger size.
-- Carousels are not supported. Only the active Story item is saved.
-- The tool depends on the MSE behavior currently observed on Instagram.
-- Headless is the default. The headless path has been validated for login
-  persistence, playback, capture, and audio on real sessions, but Instagram can
-  still change its behavior.
+- Instagram can change its media implementation at any time.
+- Photo resolution is bounded by what Instagram serves to the page.
+- Carousels are not supported. Only the active item is saved.
+- The first login needs a visible window, so one `--headed` run is required.
+
+## How it works
+
+```
+  Story item
+      |
+      +-- video: MediaSource -> video/mp4 + audio/mp4 SourceBuffers
+      |          -> exact appendBuffer bytes, in order
+      |          -> two fragmented MP4 files -> ffmpeg -c copy
+      |
+      +-- photo: <img> with a signed CDN URL
+                 -> fetched through the authenticated context
+                 -> original bytes saved unchanged
+
+  Output: one normal .mp4 (video + audio) or one image file
+```
+
+The video buffer is chosen by MIME type and `MediaSource` identity, never by
+buffer number, so preloaded Stories are not mistaken for the active one. Chunks
+are copied at append time, sequenced, and written to disk in exact order. For
+photos, the active image is identified with the `efg` media tag and geometry,
+then locked and settled before the fetch.
 
 ## License
 
