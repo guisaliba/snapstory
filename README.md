@@ -20,16 +20,18 @@ git clone https://github.com/guisaliba/snapstory.git
 cd snapstory
 npm install
 npx playwright install chromium
+npm link
 
 # First login once, with a visible window:
-./bin/snapstory 'https://www.instagram.com/stories/example/123456789/' --headed
+snapstory 'https://www.instagram.com/stories/example/123456789/' --headed
 
 # Later runs are headless:
-./bin/snapstory 'https://www.instagram.com/stories/example/123456789/'
+snapstory 'https://www.instagram.com/stories/example/123456789/'
 ```
 
-`./bin/snapstory` runs straight from the checkout. No global install is needed.
-Video Stories also need FFmpeg on `PATH`; photos do not.
+`npm link` is **not required**. It only puts the `snapstory` command on your
+`PATH`. Without it, run `./bin/snapstory` in place of `snapstory`; every flag and
+behavior is identical. Video Stories also need FFmpeg on `PATH`; photos do not.
 
 ## Requirements
 
@@ -60,17 +62,12 @@ sudo apt install ffmpeg
 brew install ffmpeg
 ```
 
-### Use the `snapstory` command anywhere (optional)
+### The global command
 
-The checkout works as-is. To get the bare `snapstory` command on your `PATH`:
+`npm link` creates a global symlink to this checkout, useful while developing.
+For a standalone global copy, use `npm install -g .`. Remove either with
+`npm unlink -g snapstory` or `npm uninstall -g snapstory`.
 
-```bash
-npm link          # symlinks this checkout; good for development
-# or
-npm install -g .  # installs a global copy from this source
-```
-
-Remove it with `npm unlink -g snapstory` or `npm uninstall -g snapstory`.
 Publishing to a registry would remove the clone step entirely
 (`npm install -g snapstory`, `npx snapstory`), but requires a publish and is not
 needed to use the tool.
