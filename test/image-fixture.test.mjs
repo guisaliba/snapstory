@@ -171,6 +171,27 @@ test('fetchImage rejects a blob URL with a clear error', { timeout: 60000 }, asy
   });
 });
 
+test('fetchImage keeps signed query strings out of request errors', { timeout: 60000 }, async () => {
+  const server = http.createServer(() => {
+    /* never respond, so the request times out */
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+
+  try {
+    await withBrowser(async ({ context }) => {
+      const url = `http://127.0.0.1:${port}/photo.jpg?oh=secret&oe=123`;
+      await assert.rejects(
+        () => fetchImage(context, url, { timeoutMs: 300 }),
+        (error) => error.code === 'image-fetch-failed' && !error.message.includes('secret'),
+      );
+    });
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test('fetchImage reports a non-OK response', { timeout: 60000 }, async () => {
   const server = http.createServer((_req, res) => {
     res.writeHead(403, { 'content-type': 'text/plain' });

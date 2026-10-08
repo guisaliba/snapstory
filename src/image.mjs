@@ -141,6 +141,17 @@ export function sanitizeImageUrl(url) {
   }
 }
 
+const URL_IN_TEXT = /https?:\/\/[^\s"'<>]+/g;
+
+/**
+ * Replace full URLs inside free text with their sanitized form. Playwright
+ * request errors can embed the requested URL, including the signed query
+ * string, so raw messages must not be forwarded to the user.
+ */
+export function redactImageUrls(text) {
+  return String(text ?? '').replace(URL_IN_TEXT, (match) => sanitizeImageUrl(match));
+}
+
 /**
  * Classify one candidate.
  * @returns {'invalid'|'profile'|'story'|'generic'}
@@ -363,7 +374,10 @@ export async function fetchImage(context, url, options = {}) {
       },
     });
   } catch (error) {
-    throw new AppError('image-fetch-failed', `Could not download the Story image: ${error.message}`);
+    throw new AppError(
+      'image-fetch-failed',
+      `Could not download the Story image: ${redactImageUrls(error?.message ?? String(error))}`,
+    );
   }
 
   if (!response.ok()) {

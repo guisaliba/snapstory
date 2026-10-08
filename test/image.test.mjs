@@ -12,6 +12,7 @@ import {
   detectImageType,
   extensionConflicts,
   extensionForType,
+  redactImageUrls,
   sanitizeImageUrl,
   selectStoryImage,
 } from '../src/image.mjs';
@@ -157,6 +158,14 @@ test('sanitizeImageUrl removes the signed query string', () => {
 test('sanitizeImageUrl shortens data and blob URLs', () => {
   assert.equal(sanitizeImageUrl('data:image/png;base64,AAAA'), '(data URL)');
   assert.equal(sanitizeImageUrl('blob:https://www.instagram.com/abc'), '(blob URL)');
+});
+
+test('redactImageUrls removes signed queries from free text', () => {
+  const text =
+    'apiRequestContext.get: Timeout 30000ms exceeded. GET https://host.example/p/photo.jpg?oh=secret&oe=123 failed';
+  const redacted = redactImageUrls(text);
+  assert.equal(redacted.includes('oh=secret'), false);
+  assert.equal(redacted.includes('https://host.example/p/photo.jpg'), true);
 });
 
 test('sanitizeImageUrl handles unparseable input', () => {
