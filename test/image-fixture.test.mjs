@@ -21,11 +21,29 @@ function svgDataUrl(width, height) {
   return `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${width}' height='${height}'%3E%3C/svg%3E`;
 }
 
-async function withServer(html, run) {
-  const server = http.createServer((_req, res) => {
+function mediaHandler(html) {
+  return (req, res) => {
+    if (req.url.startsWith('/media/')) {
+      const size = new URL(req.url, 'http://localhost').searchParams.get('size') ?? 'small';
+      const [width, height] = size === 'big' ? [1600, 2000] : [320, 320];
+      res.writeHead(200, { 'content-type': 'image/svg+xml' });
+      res.end(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"></svg>`);
+      return;
+    }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(html);
-  });
+  };
+}
+
+async function withServer(htmlOrHandler, run) {
+  const handler =
+    typeof htmlOrHandler === 'function'
+      ? htmlOrHandler
+      : (_req, res) => {
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          res.end(htmlOrHandler);
+        };
+  const server = http.createServer(handler);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   try {
@@ -142,17 +160,17 @@ test('image observer updates recency when the source changes', { timeout: 60000 
   });
 });
 
-test('lockAndSettleStoryImage waits through a placeholder upgrade', { timeout: 60000 }, async () => {
+test('lockAndSettleStoryImage waits through a same-media upgrade', { timeout: 60000 }, async () => {
   const html = `<!doctype html><html><body>
-    <img id="photo" src="${svgDataUrl(320, 320)}" style="width:300px;height:300px">
+    <img id="photo" src="/media/photo.svg?size=small&ig_cache_key=K1" style="width:300px;height:300px">
     <script>
       setTimeout(() => {
-        document.getElementById('photo').src = ${JSON.stringify(svgDataUrl(1600, 2000))};
+        document.getElementById('photo').src = '/media/photo.svg?size=big&ig_cache_key=K1';
       }, 200);
     </script>
   </body></html>`;
 
-  await withServer(html, async (url) => {
+  await withServer(mediaHandler(html), async (url) => {
     await withBrowser(async ({ page }) => {
       await page.goto(url);
       const settled = await lockAndSettleStoryImage(page, {
@@ -162,7 +180,31 @@ test('lockAndSettleStoryImage waits through a placeholder upgrade', { timeout: 6
       });
       assert.equal(settled.naturalWidth, 1600);
       assert.equal(settled.naturalHeight, 2000);
-      assert.match(settled.url, /1600/);
+      assert.match(settled.url, /size=big/);
+    });
+  });
+});
+
+test('lockAndSettleStoryImage keeps the locked item when the element switches media', { timeout: 60000 }, async () => {
+  const html = `<!doctype html><html><body>
+    <img id="photo" src="/media/one.svg?size=small&ig_cache_key=K1" style="width:300px;height:300px">
+    <script>
+      setTimeout(() => {
+        document.getElementById('photo').src = '/media/two.svg?size=big&ig_cache_key=K2';
+      }, 200);
+    </script>
+  </body></html>`;
+
+  await withServer(mediaHandler(html), async (url) => {
+    await withBrowser(async ({ page }) => {
+      await page.goto(url);
+      const settled = await lockAndSettleStoryImage(page, {
+        timeoutMs: 5000,
+        quietMs: 400,
+        pollMs: 100,
+      });
+      assert.match(settled.url, /media\/one\.svg/);
+      assert.equal(settled.naturalWidth, 320);
     });
   });
 });

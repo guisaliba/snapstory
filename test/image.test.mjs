@@ -13,6 +13,7 @@ import {
   extensionConflicts,
   extensionForType,
   redactImageUrls,
+  sameStoryMediaUrl,
   sanitizeImageUrl,
   selectStoryImage,
 } from '../src/image.mjs';
@@ -158,6 +159,35 @@ test('sanitizeImageUrl removes the signed query string', () => {
 test('sanitizeImageUrl shortens data and blob URLs', () => {
   assert.equal(sanitizeImageUrl('data:image/png;base64,AAAA'), '(data URL)');
   assert.equal(sanitizeImageUrl('blob:https://www.instagram.com/abc'), '(blob URL)');
+});
+
+test('sameStoryMediaUrl compares media identity, not the signed size', () => {
+  assert.equal(
+    sameStoryMediaUrl(
+      'https://host.example/p/photo.jpg?stp=small&ig_cache_key=K1',
+      'https://host.example/p/photo.jpg?stp=big&ig_cache_key=K1',
+    ),
+    true,
+  );
+  assert.equal(
+    sameStoryMediaUrl(
+      'https://host.example/p/one.jpg?ig_cache_key=K1',
+      'https://host.example/p/two.jpg?ig_cache_key=K2',
+    ),
+    false,
+  );
+  assert.equal(
+    sameStoryMediaUrl(
+      'https://host.example/p/photo.jpg?stp=small',
+      'https://host.example/p/photo.jpg?stp=big',
+    ),
+    true,
+  );
+  assert.equal(
+    sameStoryMediaUrl('https://host.example/p/one.jpg', 'https://host.example/p/two.jpg'),
+    false,
+  );
+  assert.equal(sameStoryMediaUrl('not a url', 'also not a url'), false);
 });
 
 test('redactImageUrls removes signed queries from free text', () => {

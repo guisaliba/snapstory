@@ -153,6 +153,27 @@ export function redactImageUrls(text) {
 }
 
 /**
+ * True when two URLs refer to the same media item.
+ *
+ * Instagram keeps the `ig_cache_key` and the URL path stable while it upgrades
+ * an item in place, and changes them when it moves to another item. A source
+ * change on the same `<img>` element is therefore only followed when the media
+ * identity is unchanged.
+ */
+export function sameStoryMediaUrl(first, second) {
+  try {
+    const a = new URL(first);
+    const b = new URL(second);
+    const keyA = a.searchParams.get('ig_cache_key');
+    const keyB = b.searchParams.get('ig_cache_key');
+    if (keyA && keyB) return keyA === keyB;
+    return `${a.origin}${a.pathname}` === `${b.origin}${b.pathname}`;
+  } catch (_error) {
+    return false;
+  }
+}
+
+/**
  * Classify one candidate.
  * @returns {'invalid'|'profile'|'story'|'generic'}
  */
@@ -323,6 +344,18 @@ export async function lockAndSettleStoryImage(page, options = {}) {
     if (current) {
       const signature = signatureOf(current);
       if (signature !== lastSignature) {
+        if (!sameStoryMediaUrl(locked.url, current.url)) {
+          // The element was reused for the next Story item. Keep the locked
+          // item instead of following the transition.
+          if (debug) {
+            log(
+              `[image] source changed to a different media item; keeping ${sanitizeImageUrl(
+                locked.url,
+              )}`,
+            );
+          }
+          return locked;
+        }
         lastSignature = signature;
         quietSince = Date.now();
         locked = current;
