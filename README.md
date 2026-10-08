@@ -223,6 +223,12 @@ Instagram is more likely to serve its normal player to it than to the older
 headless shell. Reliability is still not guaranteed, so use `--debug` and check
 the capture diagnostics.
 
+Use the **same profile** for seeding and for every later run. The default is
+`${XDG_DATA_HOME:-$HOME/.local/share}/snapstory/profile`; pass `--profile` only
+when the seeding run used the same path. When authentication fails, the error
+names the resolved profile directory, and `--debug` lists the visible
+`instagram.com` cookie names (names only, never values).
+
 ## Security
 
 The browser profile contains cookies and other sensitive login state. It is
