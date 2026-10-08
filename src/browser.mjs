@@ -232,7 +232,7 @@ async function clickGateByText(page) {
  *   - An image is accepted only after `videoGraceMs` with no video element and
  *     no MediaSource activity.
  *
- * @returns {Promise<{ ok: boolean, kind: 'video'|'image'|null, gateClicks: number, videoCount: number, videoElements: number, imageCount: number, imageCandidates: number, buttonTexts: string[] }>}
+ * @returns {Promise<{ ok: boolean, kind: 'video'|'image'|null, gateClicks: number, videoCount: number, videoElements: number, imageCount: number, imageCandidates: number, imageCandidate: object|null, buttonTexts: string[] }>}
  */
 export async function prepareStory(
   page,
@@ -243,6 +243,8 @@ export async function prepareStory(
   let gateClicks = 0;
   let buttonTexts = [];
   let imageCandidates = 0;
+  let rememberedImage = null;
+  let rememberedImageTier = null;
 
   while (Date.now() < deadline) {
     const gate = await findStoryGate(page);
@@ -353,10 +355,27 @@ export async function prepareStory(
           .catch(() => []);
         imageCandidates = candidates.length;
         const selection = selectStoryImage(candidates);
-        if (selection.chosen && Date.now() - startedAt >= videoGraceMs) {
+        // Remember the first Story image during the grace period. A photo
+        // Story can advance in about five seconds, before the grace ends, so
+        // waiting to lock would capture the next item instead.
+        if (
+          selection.chosen &&
+          (!rememberedImage || (rememberedImageTier !== 'story' && selection.tier === 'story'))
+        ) {
+          rememberedImage = selection.chosen;
+          rememberedImageTier = selection.tier;
           if (debug) {
             log(
-              `[ui] Classified Story as image after ${Date.now() - startedAt}ms (tier ${selection.tier}).`,
+              `[ui] Remembered Story image candidate id=${rememberedImage.id} tier=${selection.tier} natural=${rememberedImage.naturalWidth}x${rememberedImage.naturalHeight}.`,
+            );
+          }
+        }
+        if (rememberedImage && Date.now() - startedAt >= videoGraceMs) {
+          if (debug) {
+            log(
+              `[ui] Classified Story as image after ${Date.now() - startedAt}ms (tier ${
+                rememberedImageTier ?? 'unknown'
+              }).`,
             );
           }
           return {
@@ -367,6 +386,7 @@ export async function prepareStory(
             videoElements: state.videoElements,
             imageCount: state.images,
             imageCandidates,
+            imageCandidate: rememberedImage,
             buttonTexts,
           };
         }
@@ -416,6 +436,7 @@ export async function prepareStory(
     videoElements: finalState.videoElements,
     imageCount: finalState.images,
     imageCandidates,
+    imageCandidate: null,
     buttonTexts,
   };
 }

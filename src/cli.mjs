@@ -382,6 +382,7 @@ export async function main(argv, io = {}) {
         timeoutMs: opts.timeoutMs,
         quietMs: 1000,
         pollMs: 200,
+        lockedCandidate: prepared.imageCandidate ?? null,
         log,
         debug,
       });

@@ -209,6 +209,35 @@ test('lockAndSettleStoryImage keeps the locked item when the element switches me
   });
 });
 
+test('lockAndSettleStoryImage resumes a remembered candidate when it is gone', { timeout: 60000 }, async () => {
+  await withServer('<html></html>', async (url) => {
+    await withBrowser(async ({ page }) => {
+      await page.goto(url);
+      const remembered = {
+        id: 987654,
+        url: `${url}media/one.svg?size=big&ig_cache_key=K1`,
+        naturalWidth: 1600,
+        naturalHeight: 2000,
+        renderedWidth: 300,
+        renderedHeight: 300,
+        visible: true,
+        complete: true,
+        insertedAt: Date.now(),
+        lastSrcChangeAt: Date.now(),
+      };
+      const settled = await lockAndSettleStoryImage(page, {
+        timeoutMs: 3000,
+        quietMs: 200,
+        pollMs: 100,
+        lockedCandidate: remembered,
+      });
+      assert.equal(settled.id, 987654);
+      assert.equal(settled.naturalWidth, 1600);
+      assert.match(settled.url, /media\/one\.svg/);
+    });
+  });
+});
+
 test('fetchImage returns the exact bytes through the browser context', { timeout: 60000 }, async () => {
   const server = http.createServer((_req, res) => {
     res.writeHead(200, { 'content-type': 'image/png' });

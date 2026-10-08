@@ -299,7 +299,7 @@ function logImageCandidates(log, diagnostics) {
  * Settling avoids saving a placeholder that Instagram upgrades in place.
  *
  * @param {import('playwright').Page} page
- * @param {{ timeoutMs?: number, quietMs?: number, pollMs?: number, log?: Function, debug?: boolean }} [options]
+ * @param {{ timeoutMs?: number, quietMs?: number, pollMs?: number, log?: Function, debug?: boolean, lockedCandidate?: object|null }} [options]
  */
 export async function lockAndSettleStoryImage(page, options = {}) {
   const {
@@ -308,11 +308,23 @@ export async function lockAndSettleStoryImage(page, options = {}) {
     pollMs = 200,
     log = () => {},
     debug = false,
+    lockedCandidate = null,
   } = options;
   const deadline = Date.now() + timeoutMs;
   let locked = null;
   let lastSignature = '';
   let quietSince = 0;
+
+  if (lockedCandidate) {
+    locked = lockedCandidate;
+    lastSignature = signatureOf(locked);
+    quietSince = Date.now();
+    if (debug) {
+      log(
+        `[image] resuming remembered candidate id=${locked.id} ${sanitizeImageUrl(locked.url)}`,
+      );
+    }
+  }
 
   while (Date.now() < deadline) {
     const candidates = await page.evaluate(() =>
