@@ -124,7 +124,7 @@ export function parseCliArgs(argv) {
       keepTemp: false,
       headed: false,
       headless: true,
-      deviceScaleFactor: 1,
+      deviceScaleFactor: 2,
       timeoutMs: 120000,
       debug: false,
       force: false,
@@ -146,7 +146,7 @@ export function parseCliArgs(argv) {
     timeoutMs = Math.round(seconds * 1000);
   }
 
-  let deviceScaleFactor = 1;
+  let deviceScaleFactor = 2;
   if (values['device-scale-factor'] !== undefined) {
     const scale = Number(values['device-scale-factor']);
     if (!Number.isFinite(scale) || scale <= 0 || scale > 5) {
@@ -188,7 +188,7 @@ Options:
       --headed          Show the browser window. Use it for the first login.
       --timeout <sec>   Maximum time to wait for the Story to load and finish.
       --device-scale-factor <n>
-                        Browser device pixel ratio (default 1). Higher values
+                        Browser device pixel ratio (default 2). Higher values
                         can make Instagram request larger image variants.
       --force           Overwrite the output file if it exists.
       --debug           Print detailed capture information.

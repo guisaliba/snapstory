@@ -104,9 +104,9 @@ test('parseCliArgs parses --device-scale-factor', () => {
   assert.equal(opts.deviceScaleFactor, 3);
 });
 
-test('parseCliArgs defaults deviceScaleFactor to 1', () => {
+test('parseCliArgs defaults deviceScaleFactor to 2', () => {
   const opts = parseCliArgs(['https://www.instagram.com/stories/example/123/']);
-  assert.equal(opts.deviceScaleFactor, 1);
+  assert.equal(opts.deviceScaleFactor, 2);
 });
 
 test('parseCliArgs rejects an invalid device scale factor', () => {
