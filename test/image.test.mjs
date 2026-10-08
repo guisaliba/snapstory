@@ -248,6 +248,11 @@ test('deriveImageOutputPath builds username-storyId.ext by default', () => {
   assert.equal(result, '/base/example-123.jpg');
 });
 
+test('deriveImageOutputPath falls back to username.ext without a story id', () => {
+  const result = deriveImageOutputPath({ username: 'spilarii', extension: 'jpg', cwd: '/base' });
+  assert.equal(result, '/base/spilarii.jpg');
+});
+
 test('deriveImageOutputPath falls back to story.ext', () => {
   const result = deriveImageOutputPath({ extension: 'png', cwd: '/base' });
   assert.equal(result, '/base/story.png');

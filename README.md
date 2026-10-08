@@ -85,8 +85,14 @@ Accepted Story URL forms:
 
 ```text
 https://www.instagram.com/stories/<username>/<story-id>/
+https://www.instagram.com/stories/<username>/
 https://www.instagram.com/stories/highlights/<highlight-id>/
 ```
+
+Instagram sometimes keeps the address bar at `/stories/<username>/` without a
+story id, even while a live Story is displayed. `snapstory` accepts both forms.
+When the id is absent, it captures the currently displayed Story item and names
+the file `<username>.<ext>`.
 
 Example:
 

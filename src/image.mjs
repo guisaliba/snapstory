@@ -178,7 +178,8 @@ export function selectStoryImage(candidates, options = {}) {
  * Derive the output path for a Story image.
  *
  * A user-supplied `--output` wins. When it has no extension, the detected
- * extension is appended. Otherwise the name is `<username>-<story-id>.<ext>`.
+ * extension is appended. Otherwise the name is `<username>-<story-id>.<ext>`,
+ * `<username>.<ext>` when no story id is known, or `story.<ext>`.
  *
  * @param {{ output?: string|null, username?: string|null, storyId?: string|null, extension: string, cwd?: string }} params
  */
@@ -192,7 +193,9 @@ export function deriveImageOutputPath(params) {
   const base =
     params.username && params.storyId
       ? `${sanitizeComponent(params.username)}-${sanitizeComponent(params.storyId)}`
-      : 'story';
+      : params.username
+        ? sanitizeComponent(params.username)
+        : 'story';
   return path.resolve(cwd, `${base}.${extension}`);
 }
 

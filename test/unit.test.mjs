@@ -145,6 +145,21 @@ test('validateStoryUrl accepts a normal Story URL and extracts its parts', () =>
   });
 });
 
+test('validateStoryUrl accepts an id-less user Story URL', () => {
+  const result = validateStoryUrl('https://www.instagram.com/stories/spilarii/');
+  assert.deepEqual(result, {
+    url: 'https://www.instagram.com/stories/spilarii/',
+    username: 'spilarii',
+    storyId: null,
+  });
+});
+
+test('validateStoryUrl accepts an id-less user Story URL without a trailing slash', () => {
+  const result = validateStoryUrl('https://www.instagram.com/stories/spilarii');
+  assert.equal(result.url, 'https://www.instagram.com/stories/spilarii/');
+  assert.equal(result.storyId, null);
+});
+
 test('validateStoryUrl accepts harmless query parameters', () => {
   const result = validateStoryUrl(
     'https://www.instagram.com/stories/example/123456789/?hl=en',
@@ -426,6 +441,11 @@ test('deriveOutputPath prefers an explicit output path', () => {
 test('deriveOutputPath builds username-storyId.mp4 by default', () => {
   const result = deriveOutputPath({ username: 'example', storyId: '123', cwd: '/base' });
   assert.equal(result, '/base/example-123.mp4');
+});
+
+test('deriveOutputPath builds username.mp4 when no story id is known', () => {
+  const result = deriveOutputPath({ username: 'spilarii', storyId: null, cwd: '/base' });
+  assert.equal(result, '/base/spilarii.mp4');
 });
 
 test('deriveOutputPath falls back to story.mp4', () => {

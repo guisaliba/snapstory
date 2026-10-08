@@ -50,12 +50,18 @@ import {
   waitForCaptureComplete,
 } from './browser.mjs';
 
-const STORY_URL = /^https?:\/\/(?:www\.)?instagram\.com\/stories\/([^/?#]+)\/(\d+)\/?(?:[?#].*)?$/i;
+const STORY_URL =
+  /^https?:\/\/(?:www\.)?instagram\.com\/stories\/([^/?#]+)(?:\/(\d+))?\/?(?:[?#].*)?$/i;
 
 /**
  * Validate a Story URL and extract its parts.
+ *
+ * Instagram sometimes keeps the address bar at `/stories/<username>/` without
+ * a story id, even while a live Story is displayed. Both forms are accepted.
+ * The id is null when it is absent.
+ *
  * @param {string} raw
- * @returns {{ url: string, username: string, storyId: string }}
+ * @returns {{ url: string, username: string, storyId: string|null }}
  */
 export function validateStoryUrl(raw) {
   if (typeof raw !== 'string' || raw.trim() === '') {
@@ -75,13 +81,16 @@ export function validateStoryUrl(raw) {
   if (!match) {
     throw new AppError(
       'invalid-url',
-      'Expected a URL like https://www.instagram.com/stories/<username>/<story-id>/',
+      'Expected a URL like https://www.instagram.com/stories/<username>/<story-id>/ or https://www.instagram.com/stories/<username>/',
     );
   }
+  const [, username, storyId] = match;
   return {
-    url: `https://www.instagram.com/stories/${match[1]}/${match[2]}/`,
-    username: match[1],
-    storyId: match[2],
+    url: storyId
+      ? `https://www.instagram.com/stories/${username}/${storyId}/`
+      : `https://www.instagram.com/stories/${username}/`,
+    username,
+    storyId: storyId ?? null,
   };
 }
 
