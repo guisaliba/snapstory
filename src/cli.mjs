@@ -372,7 +372,7 @@ export async function main(argv, io = {}) {
     }
     if (debug) {
       dlog(
-        `[ui] Story prepared: kind=${prepared.kind}, gate clicks=${prepared.gateClicks}, videos=${prepared.videoCount}, image candidates=${prepared.imageCandidates}`,
+        `[ui] Story prepared: kind=${prepared.kind}, gate clicks=${prepared.gateClicks}, videos=${prepared.videoCount} of ${prepared.videoElements}, image candidates=${prepared.imageCandidates}`,
       );
     }
 

@@ -232,7 +232,7 @@ async function clickGateByText(page) {
  *   - An image is accepted only after `videoGraceMs` with no video element and
  *     no MediaSource activity.
  *
- * @returns {Promise<{ ok: boolean, kind: 'video'|'image'|null, gateClicks: number, videoCount: number, imageCount: number, imageCandidates: number, buttonTexts: string[] }>}
+ * @returns {Promise<{ ok: boolean, kind: 'video'|'image'|null, gateClicks: number, videoCount: number, videoElements: number, imageCount: number, imageCandidates: number, buttonTexts: string[] }>}
  */
 export async function prepareStory(
   page,
@@ -285,15 +285,47 @@ export async function prepareStory(
               ),
             )
           : false;
+        const intersectsViewport = (rect) =>
+          rect.bottom > 0 &&
+          rect.right > 0 &&
+          rect.top < (window.innerHeight || document.documentElement.clientHeight || 0) &&
+          rect.left < (window.innerWidth || document.documentElement.clientWidth || 0);
+        // Preloaded neighbor stories can keep a hidden `<video>` in the DOM.
+        // Only a visible video may force the video path, otherwise a photo
+        // Story would be misclassified.
+        const videoElements = Array.from(document.querySelectorAll('video'));
+        const visibleVideos = videoElements.filter((video) => {
+          try {
+            const rect = video.getBoundingClientRect();
+            const style = getComputedStyle(video);
+            return (
+              style.display !== 'none' &&
+              style.visibility !== 'hidden' &&
+              rect.width > 0 &&
+              rect.height > 0 &&
+              intersectsViewport(rect)
+            );
+          } catch (_error) {
+            return false;
+          }
+        }).length;
         return {
-          videos: document.querySelectorAll('video').length,
+          videos: visibleVideos,
+          videoElements: videoElements.length,
           images: document.querySelectorAll('img').length,
           mediaSources,
           videoBuffering,
           buttons,
         };
       })
-      .catch(() => ({ videos: 0, images: 0, mediaSources: 0, videoBuffering: false, buttons: [] }));
+      .catch(() => ({
+        videos: 0,
+        videoElements: 0,
+        images: 0,
+        mediaSources: 0,
+        videoBuffering: false,
+        buttons: [],
+      }));
 
     buttonTexts = state.buttons;
 
@@ -303,6 +335,7 @@ export async function prepareStory(
         kind: 'video',
         gateClicks,
         videoCount: state.videos,
+        videoElements: state.videoElements,
         imageCount: state.images,
         imageCandidates,
         buttonTexts,
@@ -331,6 +364,7 @@ export async function prepareStory(
             kind: 'image',
             gateClicks,
             videoCount: 0,
+            videoElements: state.videoElements,
             imageCount: state.images,
             imageCandidates,
             buttonTexts,
@@ -343,11 +377,35 @@ export async function prepareStory(
   }
 
   const finalState = await page
-    .evaluate(() => ({
-      videos: document.querySelectorAll('video').length,
-      images: document.querySelectorAll('img').length,
-    }))
-    .catch(() => ({ videos: 0, images: 0 }));
+    .evaluate(() => {
+      const intersectsViewport = (rect) =>
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < (window.innerHeight || document.documentElement.clientHeight || 0) &&
+        rect.left < (window.innerWidth || document.documentElement.clientWidth || 0);
+      const videoElements = Array.from(document.querySelectorAll('video'));
+      const visibleVideos = videoElements.filter((video) => {
+        try {
+          const rect = video.getBoundingClientRect();
+          const style = getComputedStyle(video);
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            rect.width > 0 &&
+            rect.height > 0 &&
+            intersectsViewport(rect)
+          );
+        } catch (_error) {
+          return false;
+        }
+      }).length;
+      return {
+        videos: visibleVideos,
+        videoElements: videoElements.length,
+        images: document.querySelectorAll('img').length,
+      };
+    })
+    .catch(() => ({ videos: 0, videoElements: 0, images: 0 }));
 
   if (debug) log(`[ui] Visible buttons at timeout: ${JSON.stringify(buttonTexts)}`);
   return {
@@ -355,6 +413,7 @@ export async function prepareStory(
     kind: null,
     gateClicks,
     videoCount: finalState.videos,
+    videoElements: finalState.videoElements,
     imageCount: finalState.images,
     imageCandidates,
     buttonTexts,
@@ -378,7 +437,16 @@ export async function startPlayback(page) {
         let visible = false;
         try {
           const rect = video.getBoundingClientRect();
-          visible = rect.width > 8 && rect.height > 8;
+          const style = getComputedStyle(video);
+          visible =
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            rect.width > 8 &&
+            rect.height > 8 &&
+            rect.bottom > 0 &&
+            rect.right > 0 &&
+            rect.top < (window.innerHeight || document.documentElement.clientHeight || 0) &&
+            rect.left < (window.innerWidth || document.documentElement.clientWidth || 0);
         } catch (_error) {
           visible = false;
         }

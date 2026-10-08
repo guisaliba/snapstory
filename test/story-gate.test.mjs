@@ -104,6 +104,41 @@ test('prepareStory classifies an image Story after the video grace period', { ti
   );
 });
 
+test('prepareStory ignores hidden preloaded videos for a photo Story', { timeout: 60000 }, async () => {
+  const html = `<html><body>
+    <img src="${svgDataUrl(800, 1000)}" style="width:400px;height:500px">
+    <video style="display:none"></video>
+  </body></html>`;
+  await withPage(
+    async (page) => {
+      await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      const result = await prepareStory(page, { timeoutMs: 10000, videoGraceMs: 200 });
+      assert.equal(result.ok, true);
+      assert.equal(result.kind, 'image');
+      assert.equal(result.videoCount, 0);
+      assert.equal(result.videoElements, 1);
+    },
+    { init: true },
+  );
+});
+
+test('prepareStory prefers a visible video over an image', { timeout: 60000 }, async () => {
+  const html = `<html><body>
+    <img src="${svgDataUrl(800, 1000)}" style="width:400px;height:500px">
+    <video style="width:400px;height:500px"></video>
+  </body></html>`;
+  await withPage(
+    async (page) => {
+      await page.goto(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      const result = await prepareStory(page, { timeoutMs: 10000, videoGraceMs: 200 });
+      assert.equal(result.ok, true);
+      assert.equal(result.kind, 'video');
+      assert.equal(result.videoCount, 1);
+    },
+    { init: true },
+  );
+});
+
 test('prepareStory keeps the video path alive while video buffers are active', { timeout: 60000 }, async () => {
   const html = `<html><body><img src="${svgDataUrl(800, 1000)}" style="width:400px;height:500px"></body></html>`;
   await withPage(
