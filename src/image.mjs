@@ -20,7 +20,8 @@ import { expandHome, sanitizeComponent } from './media.mjs';
 const MIN_RENDERED_AREA = 160 * 160;
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-const HEIC_BRANDS = new Set(['heic', 'heix', 'hevc', 'heim', 'heis', 'mif1', 'msf1']);
+const HEIC_CODEC_BRANDS = new Set(['heic', 'heix', 'hevc', 'heim', 'heis']);
+const HEIF_GENERIC_BRANDS = new Set(['mif1', 'msf1', 'miaf']);
 const AVIF_BRANDS = new Set(['avif', 'avis']);
 
 const EXTENSIONS = Object.freeze({
@@ -58,6 +59,37 @@ export function decodeEncodeTag(url) {
 }
 
 /**
+ * Classify an ISO-BMFF image by its `ftyp` brands.
+ *
+ * A generic structural brand such as `mif1` can carry either HEIC or AVIF
+ * content. The real codec is then identified by the compatible brands, so the
+ * compatible list must be inspected before choosing an extension.
+ */
+function detectIsoBmffImageType(buffer) {
+  if (buffer.length < 12 || buffer.toString('latin1', 4, 8) !== 'ftyp') return null;
+
+  const declaredSize = buffer.readUInt32BE(0);
+  const end = declaredSize >= 16 ? Math.min(declaredSize, buffer.length) : buffer.length;
+  const majorBrand = buffer.toString('latin1', 8, 12);
+  const compatibleBrands = [];
+  for (let offset = 16; offset + 4 <= end; offset += 4) {
+    compatibleBrands.push(buffer.toString('latin1', offset, offset + 4));
+  }
+
+  if (AVIF_BRANDS.has(majorBrand) || compatibleBrands.some((brand) => AVIF_BRANDS.has(brand))) {
+    return 'avif';
+  }
+  if (
+    HEIC_CODEC_BRANDS.has(majorBrand) ||
+    compatibleBrands.some((brand) => HEIC_CODEC_BRANDS.has(brand))
+  ) {
+    return 'heic';
+  }
+  if (HEIF_GENERIC_BRANDS.has(majorBrand)) return 'heic';
+  return null;
+}
+
+/**
  * Detect an image type from magic bytes. The URL path is not trusted, because
  * a `.heic` path can deliver JPEG bytes.
  *
@@ -85,9 +117,7 @@ export function detectImageType(buffer) {
   }
 
   if (buffer.length >= 12 && buffer.toString('latin1', 4, 8) === 'ftyp') {
-    const brand = buffer.toString('latin1', 8, 12);
-    if (HEIC_BRANDS.has(brand)) return 'heic';
-    if (AVIF_BRANDS.has(brand)) return 'avif';
+    return detectIsoBmffImageType(buffer);
   }
 
   return null;

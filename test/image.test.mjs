@@ -112,6 +112,24 @@ test('detectImageType recognises heic and avif ftyp brands', () => {
   assert.equal(detectImageType(avif), 'avif');
 });
 
+function ftypBuffer(major, compatible = []) {
+  const brands = Buffer.from(compatible.join(''), 'latin1');
+  const size = 16 + brands.length;
+  const header = Buffer.alloc(16);
+  header.writeUInt32BE(size, 0);
+  header.write('ftyp', 4, 'latin1');
+  header.write(major, 8, 'latin1');
+  return Buffer.concat([header, brands]);
+}
+
+test('detectImageType reads compatible brands for generic major brands', () => {
+  assert.equal(detectImageType(ftypBuffer('mif1', ['mif1'])), 'heic');
+  assert.equal(detectImageType(ftypBuffer('mif1', ['avif', 'mif1'])), 'avif');
+  assert.equal(detectImageType(ftypBuffer('msf1', ['heic', 'mif1'])), 'heic');
+  assert.equal(detectImageType(ftypBuffer('heic', ['mif1', 'heic'])), 'heic');
+  assert.equal(detectImageType(ftypBuffer('zzzz', ['zzzz'])), null);
+});
+
 test('detectImageType returns null for unknown bytes', () => {
   assert.equal(detectImageType(Buffer.from('not an image at all')), null);
   assert.equal(detectImageType(Buffer.alloc(0)), null);
