@@ -383,7 +383,6 @@ function imageObserver() {
       out.push({
         id: record.id,
         url: element.currentSrc || element.src || record.lastUrl || '',
-        srcset: element.srcset || '',
         naturalWidth: element.naturalWidth || 0,
         naturalHeight: element.naturalHeight || 0,
         renderedWidth: Math.round(rect.width),

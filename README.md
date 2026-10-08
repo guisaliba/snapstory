@@ -168,11 +168,6 @@ snapstory 'https://www.instagram.com/stories/highlights/<id>/'
 - FFmpeg is not required for image Stories.
 - Resolution is limited to what Instagram serves to the page. The CDN URL is
   signed; changing a size parameter is rejected with `403`.
-- A `srcset` upgrade path is kept as a **precaution, not an observed behavior**:
-  live evidence showed an empty `srcset` on every observed image. `--debug`
-  prints a `srcset summary: total=N empty=N nonEmpty=N` line per run. If
-  `nonEmpty` stays zero across your tests, that branch is dead code and can be
-  removed.
 - Only the active item is saved. Carousels are not yet supported.
 - Signed URLs are treated as temporary secrets and are printed with the query
   string removed.
@@ -288,9 +283,9 @@ The suite runs without Instagram and without a browser login:
 - **MSE fixture test** — loads a local page in headless Chromium that uses
   `MediaSource` and `SourceBuffer`, then proves the interceptor captures video
   and audio bytes byte-for-byte.
-- **Image tests** — unit tests for type detection, selection, naming, and
-  `srcset` parsing; browser tests for the image observer, the settle wait
-  through a placeholder upgrade, and the authenticated fetch round-trip.
+- **Image tests** — unit tests for type detection, selection, and naming;
+  browser tests for the image observer, the settle wait through a placeholder
+  upgrade, and the authenticated fetch round-trip.
 
 ### Manual Instagram test
 

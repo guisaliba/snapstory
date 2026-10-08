@@ -12,8 +12,6 @@ import {
   detectImageType,
   extensionConflicts,
   extensionForType,
-  parseSrcset,
-  resolveBestImageUrl,
   sanitizeImageUrl,
   selectStoryImage,
 } from '../src/image.mjs';
@@ -36,7 +34,6 @@ function candidate(overrides = {}) {
   return {
     id: 1,
     url: 'https://cdn.example/photo.jpg',
-    srcset: '',
     naturalWidth: 800,
     naturalHeight: 1000,
     renderedWidth: 400,
@@ -77,49 +74,6 @@ test('decodeEncodeTag returns null when vencode_tag is absent', () => {
     .toString('base64')
     .replace(/=+$/, '');
   assert.equal(decodeEncodeTag(`https://cdn.example/photo.jpg?efg=${efg}`), null);
-});
-
-// ---------------------------------------------------------------------------
-// parseSrcset
-// ---------------------------------------------------------------------------
-
-test('parseSrcset reads w descriptors', () => {
-  const entries = parseSrcset('a.jpg 320w, b.jpg 1080w');
-  assert.deepEqual(
-    entries.map((e) => [e.url, e.width]),
-    [
-      ['a.jpg', 320],
-      ['b.jpg', 1080],
-    ],
-  );
-});
-
-test('parseSrcset reads x descriptors', () => {
-  const entries = parseSrcset('a.jpg 1x, b.jpg 2x');
-  assert.deepEqual(
-    entries.map((e) => [e.url, e.density]),
-    [
-      ['a.jpg', 1],
-      ['b.jpg', 2],
-    ],
-  );
-});
-
-test('parseSrcset handles candidates without descriptors', () => {
-  const entries = parseSrcset('a.jpg');
-  assert.equal(entries.length, 1);
-  assert.equal(entries[0].url, 'a.jpg');
-  assert.equal(entries[0].width, 0);
-});
-
-test('parseSrcset tolerates missing spaces after commas', () => {
-  const entries = parseSrcset('a.jpg 320w,b.jpg 1080w');
-  assert.deepEqual(entries.map((e) => e.url), ['a.jpg', 'b.jpg']);
-});
-
-test('parseSrcset returns empty for empty input', () => {
-  assert.deepEqual(parseSrcset(''), []);
-  assert.deepEqual(parseSrcset(undefined), []);
 });
 
 // ---------------------------------------------------------------------------
@@ -174,22 +128,8 @@ test('extensionForType maps every type', () => {
 });
 
 // ---------------------------------------------------------------------------
-// resolveBestImageUrl and sanitizeImageUrl
+// sanitizeImageUrl
 // ---------------------------------------------------------------------------
-
-test('resolveBestImageUrl picks the largest w candidate', () => {
-  const chosen = resolveBestImageUrl({ url: 'small.jpg', srcset: 'small.jpg 320w, big.jpg 1080w' });
-  assert.equal(chosen, 'big.jpg');
-});
-
-test('resolveBestImageUrl picks the largest x density above 1', () => {
-  const chosen = resolveBestImageUrl({ url: 'one.jpg', srcset: 'one.jpg 1x, two.jpg 2x' });
-  assert.equal(chosen, 'two.jpg');
-});
-
-test('resolveBestImageUrl falls back to the url when srcset is absent', () => {
-  assert.equal(resolveBestImageUrl({ url: 'only.jpg', srcset: '' }), 'only.jpg');
-});
 
 test('sanitizeImageUrl removes the signed query string', () => {
   const safe = sanitizeImageUrl('https://host.example/v/t51/photo.jpg?oh=secret&oe=123');
@@ -278,20 +218,6 @@ test('selectStoryImage breaks ties by recency', () => {
   const newer = candidate({ id: 2, lastSrcChangeAt: 20 });
   const result = selectStoryImage([older, newer]);
   assert.equal(result.chosen.id, 2);
-});
-
-test('selectStoryImage diagnostics report srcset coverage', () => {
-  const withSrcset = candidate({ id: 1, srcset: 'a.jpg 320w, b.jpg 1080w' });
-  const without = candidate({ id: 2, url: taggedUrl('STORY.xpids.1440.sdr.regular_photo.C3') });
-  const result = selectStoryImage([withSrcset, without]);
-
-  const withDescriptors = result.diagnostics.find((line) => line.id === 1);
-  assert.equal(withDescriptors.srcsetEmpty, false);
-  assert.equal(withDescriptors.srcsetEntries, 2);
-
-  const withoutDescriptors = result.diagnostics.find((line) => line.id === 2);
-  assert.equal(withoutDescriptors.srcsetEmpty, true);
-  assert.equal(withoutDescriptors.srcsetEntries, 0);
 });
 
 test('selectStoryImage returns none when every candidate is invalid', () => {

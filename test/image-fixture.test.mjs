@@ -137,31 +137,7 @@ test('lockAndSettleStoryImage waits through a placeholder upgrade', { timeout: 6
       });
       assert.equal(settled.naturalWidth, 1600);
       assert.equal(settled.naturalHeight, 2000);
-      assert.match(settled.bestUrl, /1600/);
-    });
-  });
-});
-
-test('lockAndSettleStoryImage reports srcset coverage in debug mode', { timeout: 60000 }, async () => {
-  const html = `<!doctype html><html><body>
-    <img id="photo" src="${svgDataUrl(800, 1000)}" style="width:400px;height:500px">
-  </body></html>`;
-
-  await withServer(html, async (url) => {
-    await withBrowser(async ({ page }) => {
-      await page.goto(url);
-      const lines = [];
-      await lockAndSettleStoryImage(page, {
-        timeoutMs: 10000,
-        quietMs: 200,
-        pollMs: 100,
-        debug: true,
-        log: (line) => lines.push(line),
-      });
-      assert.ok(
-        lines.some((line) => line.includes('srcset summary: total=1 empty=1 nonEmpty=0')),
-        `expected a srcset summary line, got: ${lines.join(' | ')}`,
-      );
+      assert.match(settled.url, /1600/);
     });
   });
 });
