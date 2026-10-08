@@ -10,7 +10,7 @@ import test from 'node:test';
 import { chromium } from 'playwright';
 
 import { INIT_SCRIPT } from '../src/capture.mjs';
-import { fetchImage, lockAndSettleStoryImage } from '../src/image.mjs';
+import { fetchImage, lockAndSettleStoryImage, selectStoryImage } from '../src/image.mjs';
 
 const ONE_PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -52,6 +52,7 @@ test('image observer registers images with natural size and visibility', { timeo
     <img id="small" src="${svgDataUrl(320, 240)}" style="width:160px;height:120px">
     <img id="large" src="${svgDataUrl(800, 1000)}" style="width:400px;height:500px">
     <img id="hidden" src="${svgDataUrl(900, 900)}" style="display:none">
+    <img id="offscreen" src="${svgDataUrl(1000, 1000)}" style="position:absolute;left:-5000px;top:0;width:400px;height:500px">
   </body></html>`;
 
   await withServer(html, async (url) => {
@@ -59,11 +60,11 @@ test('image observer registers images with natural size and visibility', { timeo
       await page.goto(url);
       await page.waitForFunction(() => {
         const images = Array.from(document.querySelectorAll('img'));
-        return images.length === 3 && images.every((image) => image.complete);
+        return images.length === 4 && images.every((image) => image.complete);
       });
 
       const snapshot = await page.evaluate(() => window.__snapstorySnapshotImages());
-      assert.equal(snapshot.length, 3);
+      assert.equal(snapshot.length, 4);
 
       const large = snapshot.find((candidate) => candidate.naturalWidth === 800);
       assert.ok(large, 'expected the 800x1000 image');
@@ -78,8 +79,32 @@ test('image observer registers images with natural size and visibility', { timeo
       assert.ok(hidden, 'expected the hidden image to be registered');
       assert.equal(hidden.visible, false);
 
+      const offscreen = snapshot.find((candidate) => candidate.naturalWidth === 1000);
+      assert.ok(offscreen, 'expected the off-screen image to be registered');
+      assert.equal(offscreen.visible, false, 'a translated off-screen image must not be visible');
+
       const ids = new Set(snapshot.map((candidate) => candidate.id));
-      assert.equal(ids.size, 3);
+      assert.equal(ids.size, 4);
+    });
+  });
+});
+
+test('selectStoryImage ignores images outside the viewport', { timeout: 60000 }, async () => {
+  const html = `<!doctype html><html><body>
+    <img id="active" src="${svgDataUrl(480, 853)}" style="width:400px;height:500px">
+    <img id="neighbor" src="${svgDataUrl(1000, 1000)}" style="position:absolute;left:-5000px;top:0;width:400px;height:500px">
+  </body></html>`;
+
+  await withServer(html, async (url) => {
+    await withBrowser(async ({ page }) => {
+      await page.goto(url);
+      await page.waitForFunction(() =>
+        Array.from(document.querySelectorAll('img')).every((image) => image.complete),
+      );
+      const snapshot = await page.evaluate(() => window.__snapstorySnapshotImages());
+      const selection = selectStoryImage(snapshot);
+      assert.ok(selection.chosen, 'expected a chosen image');
+      assert.equal(selection.chosen.naturalWidth, 480);
     });
   });
 });

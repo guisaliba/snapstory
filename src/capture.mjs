@@ -367,16 +367,26 @@ function imageObserver() {
     sweep();
     const out = [];
     for (const [element, record] of registry.records) {
-      let rect = { width: 0, height: 0 };
+      let rect = { width: 0, height: 0, top: 0, left: 0, bottom: 0, right: 0 };
       let visible = false;
       try {
         rect = element.getBoundingClientRect();
         const style = getComputedStyle(element);
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        // A translated carousel neighbor can keep a nonzero rectangle while it
+        // sits fully outside the viewport. Require an actual intersection.
+        const intersectsViewport =
+          rect.bottom > 0 &&
+          rect.right > 0 &&
+          rect.top < viewportHeight &&
+          rect.left < viewportWidth;
         visible =
           style.display !== 'none' &&
           style.visibility !== 'hidden' &&
           rect.width > 0 &&
-          rect.height > 0;
+          rect.height > 0 &&
+          intersectsViewport;
       } catch (_error) {
         visible = false;
       }
